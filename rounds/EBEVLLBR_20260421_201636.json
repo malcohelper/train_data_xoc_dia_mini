@@ -1,0 +1,158 @@
+{
+  "roundId": "EBEVLLBR",
+  "timer": 28,
+  "isNewRound": false,
+  "winner": "CHAN",
+  "diceCount": {
+    "red": 4,
+    "white": 0,
+    "total": 4
+  },
+  "result": "LE",
+  "detectedArea": "area_4_red",
+  "regions": {
+    "round_id": {
+      "bbox": [
+        1050,
+        407,
+        1103,
+        422
+      ],
+      "conf": 0.35261115431785583
+    },
+    "timer": {
+      "bbox": [
+        1054,
+        446,
+        1100,
+        489
+      ],
+      "conf": 0.6296404600143433
+    },
+    "new_round": {
+      "bbox": null,
+      "conf": 0.0
+    }
+  },
+  "betAreas": {
+    "area_chan": {
+      "bbox": [
+        925,
+        427,
+        1023,
+        496
+      ],
+      "conf": 0.8767512440681458,
+      "isActive": true,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "area_le": {
+      "bbox": [
+        1127,
+        430,
+        1225,
+        492
+      ],
+      "conf": 0.7724602818489075,
+      "isActive": true,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "area_4_red": {
+      "bbox": [
+        931,
+        513,
+        998,
+        564
+      ],
+      "conf": 0.8958522081375122,
+      "isActive": true,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "area_3w_1r": {
+      "bbox": [
+        1009,
+        510,
+        1074,
+        563
+      ],
+      "conf": 0.36077433824539185,
+      "isActive": true,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "area_3r_1w": {
+      "bbox": [
+        1083,
+        511,
+        1146,
+        567
+      ],
+      "conf": 0.804158627986908,
+      "isActive": true,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "area_4_white": {
+      "bbox": [
+        1155,
+        511,
+        1223,
+        565
+      ],
+      "conf": 0.7582024931907654,
+      "isActive": true,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "4r": {
+      "bbox": null,
+      "conf": 0.0,
+      "isActive": false,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "3w1r": {
+      "bbox": null,
+      "conf": 0.0,
+      "isActive": false,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "3r1w": {
+      "bbox": null,
+      "conf": 0.0,
+      "isActive": false,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "4w": {
+      "bbox": null,
+      "conf": 0.0,
+      "isActive": false,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    },
+    "2w2r": {
+      "bbox": null,
+      "conf": 0.0,
+      "isActive": false,
+      "sub_count": null,
+      "sub_money": null,
+      "sub_boxes": []
+    }
+  },
+  "detectionPass": "primary"
+}

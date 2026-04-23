@@ -1,0 +1,19 @@
+path: dataset
+train: images/train
+val: images/val
+
+names:
+  0: round_id       # O mau do phia tren (#2773104)
+  1: timer          # O mau vang o giua (21)
+  2: area_chan      # Vung dat cuoc Chan (mau cam)
+  3: area_le        # Vung dat cuoc Le (mau xanh la)
+  4: area_4_red     # Vung 4 do (mau xanh cyan)
+  5: area_3w_1r     # Vung 3 trang 1 do (mau xanh duong)
+  6: area_3r_1w     # Vung 3 do 1 trang (mau hong)
+  7: area_4_white   # Vung 4 trang (mau tim)
+  8: new_round
+  9: 4r
+  10: 4w
+  11: 3w1r
+  12: 3r1w
+  13: 2w2r

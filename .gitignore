@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Training artifacts
+runs/
+wandb/
+mlruns/
+
+# Model weights (download or train locally; do not commit)
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Temporary captures / debug images at repo root
+temp_capture.png

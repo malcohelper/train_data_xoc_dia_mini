@@ -3,58 +3,22 @@ from pathlib import Path
 
 import cv2
 
+from classes import CLASSES, CLASS_GROUPS, COLORS
+
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
 
-# 17-class schema (must match xocdia.yaml).
-CLASSES = {
-    0: "round_id",
-    1: "timer",
-    2: "new_round",
-    3: "area_chan",
-    4: "area_le",
-    5: "area_4_red",
-    6: "area_3w_1r",
-    7: "area_3r_1w",
-    8: "area_4_white",
-    9: "dice_4r",
-    10: "dice_4w",
-    11: "dice_3w1r",
-    12: "dice_3r1w",
-    13: "dice_2w2r",
-    14: "percent_cell",
-    15: "total_bet_cell",
-    16: "total_count_cell",
+# Pretty labels used only for the status bar (keeps the existing UI wording).
+_STATUS_GROUP_LABELS = {
+    "state": "State",
+    "area": "Areas",
+    "dice": "Dice",
+    "cell": "Cells",
 }
-
-# BGR colors chosen to roughly match each element's in-game appearance.
-COLORS = {
-    0: (0, 0, 220),         # round_id          - deep red banner
-    1: (0, 220, 255),       # timer             - yellow/white disc
-    2: (60, 180, 255),      # new_round         - orange-ish banner
-    3: (0, 165, 255),       # area_chan         - orange
-    4: (0, 220, 0),         # area_le           - green
-    5: (255, 255, 0),       # area_4_red        - cyan
-    6: (255, 128, 0),       # area_3w_1r        - blue
-    7: (180, 80, 200),      # area_3r_1w        - pink
-    8: (180, 0, 180),       # area_4_white      - purple
-    9: (40, 40, 255),       # dice_4r           - red
-    10: (240, 240, 240),    # dice_4w           - white
-    11: (120, 120, 255),    # dice_3w1r         - light red
-    12: (120, 80, 255),     # dice_3r1w         - pinkish
-    13: (180, 180, 80),     # dice_2w2r         - teal/olive
-    14: (0, 255, 180),      # percent_cell      - mint
-    15: (50, 220, 255),     # total_bet_cell    - yellow-ish (money)
-    16: (220, 220, 220),    # total_count_cell  - light gray
-}
-
-# Grouping used only for the status bar, to make 17 classes easy to scan.
-CLASS_GROUPS = [
-    ("State", [0, 1, 2]),
-    ("Areas", [3, 4, 5, 6, 7, 8]),
-    ("Dice", [9, 10, 11, 12, 13]),
-    ("Cells", [14, 15, 16]),
+_STATUS_GROUPS = [
+    (_STATUS_GROUP_LABELS.get(name, name.title()), ids)
+    for name, ids in CLASS_GROUPS
 ]
 
 
@@ -253,7 +217,7 @@ class LabelTool:
             class_counts[box["class"]] += 1
 
         y = 130 if self.class_input_mode else 108
-        for group_name, ids in CLASS_GROUPS:
+        for group_name, ids in _STATUS_GROUPS:
             parts = [f"{cid}:{self.classes[cid]}({class_counts[cid]})" for cid in ids]
             line = f"{group_name:<6}| " + "  ".join(parts)
             cv2.putText(

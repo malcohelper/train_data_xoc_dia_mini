@@ -2,18 +2,32 @@ path: dataset
 train: images/train
 val: images/val
 
+# 17-class schema for single-stage YOLOv8 detector.
+# Text cells (percent/total_bet/total_count) use generic classes and are
+# mapped to specific bet types (chan/le/4r/4w/3w1r/3r1w) downstream via
+# geometric matching against the area_* anchors in pipeline.py.
 names:
-  0: round_id       # O mau do phia tren (#2773104)
-  1: timer          # O mau vang o giua (21)
-  2: area_chan      # Vung dat cuoc Chan (mau cam)
-  3: area_le        # Vung dat cuoc Le (mau xanh la)
-  4: area_4_red     # Vung 4 do (mau xanh cyan)
-  5: area_3w_1r     # Vung 3 trang 1 do (mau xanh duong)
-  6: area_3r_1w     # Vung 3 do 1 trang (mau hong)
-  7: area_4_white   # Vung 4 trang (mau tim)
-  8: new_round
-  9: 4r
-  10: 4w
-  11: 3w1r
-  12: 3r1w
-  13: 2w2r
+  # 0) ID / state
+  0: round_id            # "#2777221" banner
+  1: timer               # countdown in center disc (white, turns red when <=10s)
+  2: new_round           # "Phien moi" banner at round start
+
+  # 1) Betting areas (6 colored anchors used to map text cells)
+  3: area_chan           # orange
+  4: area_le             # green
+  5: area_4_red          # cyan
+  6: area_3w_1r          # blue
+  7: area_3r_1w          # pink
+  8: area_4_white        # purple
+
+  # 2) Dice result (only visible when bowl opens)
+  9: dice_4r
+  10: dice_4w
+  11: dice_3w1r
+  12: dice_3r1w
+  13: dice_2w2r
+
+  # 3) Generic text cells (6 instances each per frame)
+  14: percent_cell       # history % row cells in top scoreboard
+  15: total_bet_cell     # yellow total-money text (e.g. 7.47M)
+  16: total_count_cell   # white player-count text (e.g. 299)

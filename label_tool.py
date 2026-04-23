@@ -7,6 +7,57 @@ import cv2
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
 
+# 17-class schema (must match xocdia.yaml).
+CLASSES = {
+    0: "round_id",
+    1: "timer",
+    2: "new_round",
+    3: "area_chan",
+    4: "area_le",
+    5: "area_4_red",
+    6: "area_3w_1r",
+    7: "area_3r_1w",
+    8: "area_4_white",
+    9: "dice_4r",
+    10: "dice_4w",
+    11: "dice_3w1r",
+    12: "dice_3r1w",
+    13: "dice_2w2r",
+    14: "percent_cell",
+    15: "total_bet_cell",
+    16: "total_count_cell",
+}
+
+# BGR colors chosen to roughly match each element's in-game appearance.
+COLORS = {
+    0: (0, 0, 220),         # round_id          - deep red banner
+    1: (0, 220, 255),       # timer             - yellow/white disc
+    2: (60, 180, 255),      # new_round         - orange-ish banner
+    3: (0, 165, 255),       # area_chan         - orange
+    4: (0, 220, 0),         # area_le           - green
+    5: (255, 255, 0),       # area_4_red        - cyan
+    6: (255, 128, 0),       # area_3w_1r        - blue
+    7: (180, 80, 200),      # area_3r_1w        - pink
+    8: (180, 0, 180),       # area_4_white      - purple
+    9: (40, 40, 255),       # dice_4r           - red
+    10: (240, 240, 240),    # dice_4w           - white
+    11: (120, 120, 255),    # dice_3w1r         - light red
+    12: (120, 80, 255),     # dice_3r1w         - pinkish
+    13: (180, 180, 80),     # dice_2w2r         - teal/olive
+    14: (0, 255, 180),      # percent_cell      - mint
+    15: (50, 220, 255),     # total_bet_cell    - yellow-ish (money)
+    16: (220, 220, 220),    # total_count_cell  - light gray
+}
+
+# Grouping used only for the status bar, to make 17 classes easy to scan.
+CLASS_GROUPS = [
+    ("State", [0, 1, 2]),
+    ("Areas", [3, 4, 5, 6, 7, 8]),
+    ("Dice", [9, 10, 11, 12, 13]),
+    ("Cells", [14, 15, 16]),
+]
+
+
 class LabelTool:
     def __init__(
         self,
@@ -20,38 +71,8 @@ class LabelTool:
         self.labels_folder = Path(labels_folder)
         self.labels_folder.mkdir(parents=True, exist_ok=True)
 
-        self.classes = {
-            0: "round_id",
-            1: "timer",
-            2: "area_chan",
-            3: "area_le",
-            4: "area_4_red",
-            5: "area_3w_1r",
-            6: "area_3r_1w",
-            7: "area_4_white",
-            8: "new_round",
-            9: "4r",
-            10: "4w",
-            11: "3w1r",
-            12: "3r1w",
-            13: "2w2r",
-        }
-        self.colors = {
-            0: (0, 255, 255),
-            1: (0, 220, 255),
-            2: (0, 165, 255),
-            3: (0, 255, 0),
-            4: (255, 255, 0),
-            5: (255, 0, 0),
-            6: (255, 0, 255),
-            7: (128, 0, 128),
-            8: (60, 180, 255),
-            9: (0, 0, 255),
-            10: (220, 220, 220),
-            11: (255, 80, 80),
-            12: (255, 120, 200),
-            13: (180, 180, 0),
-        }
+        self.classes = CLASSES
+        self.colors = COLORS
 
         self.only_unlabeled = only_unlabeled
         self.autosave = autosave
@@ -65,6 +86,11 @@ class LabelTool:
         self.current_img = None
         self.current_img_path = None
         self.current_index = 0
+
+        # Text-input class picker state. Active while the user is typing a
+        # 1-2 digit class number after pressing '/'.
+        self.class_input_mode = False
+        self.class_input_buffer = ""
 
         self.images = self.collect_images()
         if self.only_unlabeled:
@@ -156,6 +182,13 @@ class LabelTool:
             self.current_class = (self.current_class + 1) % len(self.classes)
             print(f"Auto-next class -> {self.current_class}:{self.classes[self.current_class]}")
 
+    def set_class(self, cls_id):
+        if cls_id in self.classes:
+            self.current_class = cls_id
+            print(f"Class -> {cls_id}:{self.classes[cls_id]}")
+        else:
+            print(f"Invalid class id: {cls_id}")
+
     def draw_boxes(self, frame):
         h, w = frame.shape[:2]
         for box in self.boxes:
@@ -184,42 +217,112 @@ class LabelTool:
     def draw_status(self, frame):
         idx = self.current_index + 1
         total = len(self.images)
-        title = f"[{idx}/{total}] {self.current_img_path.name} | class={self.current_class}:{self.classes[self.current_class]}"
+        title = (
+            f"[{idx}/{total}] {self.current_img_path.name} | "
+            f"class={self.current_class}:{self.classes[self.current_class]}"
+        )
         cv2.putText(frame, title, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        controls = "0-9 class | j/k prev/next class | t auto-next | u undo | x clear class | c copy prev | p prev | space next | s save | a autosave | q quit"
-        cv2.putText(frame, controls, (10, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1)
+        controls_1 = "0-9: class | j/k: prev/next | / + NN + Enter: jump class | t: auto-next"
+        controls_2 = "u: undo | x: clear class | c: copy prev | p: prev img | space: next | s: save | a: autosave | q: quit"
+        cv2.putText(frame, controls_1, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
+        cv2.putText(frame, controls_2, (10, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
 
         status = (
             f"autosave={'ON' if self.autosave else 'OFF'} | "
             f"auto-next-class={'ON' if self.auto_next_class else 'OFF'} | "
             f"boxes={len(self.boxes)}"
         )
-        cv2.putText(frame, status, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 220, 80), 1)
+        cv2.putText(frame, status, (10, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 220, 80), 1)
 
-        y = 92
+        # Class-input mode banner
+        if self.class_input_mode:
+            cv2.putText(
+                frame,
+                f"Class input: '{self.class_input_buffer}_' (Enter to apply, Esc to cancel)",
+                (10, 108),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 200, 255),
+                2,
+            )
+
+        # Per-group class counts grid (4 lines).
         class_counts = {k: 0 for k in self.classes}
         for box in self.boxes:
             class_counts[box["class"]] += 1
-        summary = " ".join(f"{k}:{class_counts[k]}" for k in self.classes)
-        cv2.putText(frame, summary, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.47, (220, 220, 220), 1)
+
+        y = 130 if self.class_input_mode else 108
+        for group_name, ids in CLASS_GROUPS:
+            parts = [f"{cid}:{self.classes[cid]}({class_counts[cid]})" for cid in ids]
+            line = f"{group_name:<6}| " + "  ".join(parts)
+            cv2.putText(
+                frame,
+                line,
+                (10, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (220, 220, 220),
+                1,
+            )
+            y += 18
+
+    def _apply_class_input(self):
+        if not self.class_input_buffer:
+            print("Empty class input, cancelled.")
+        else:
+            try:
+                cls_id = int(self.class_input_buffer)
+                self.set_class(cls_id)
+            except ValueError:
+                print(f"Invalid class input: {self.class_input_buffer}")
+        self.class_input_mode = False
+        self.class_input_buffer = ""
+
+    def handle_class_input_key(self, key):
+        """Handle keys while in class-input mode. Returns True if consumed."""
+        if key == 13 or key == 10:  # Enter
+            self._apply_class_input()
+            return True
+        if key == 27:  # Esc
+            print("Class input cancelled.")
+            self.class_input_mode = False
+            self.class_input_buffer = ""
+            return True
+        if key == 8 or key == 127:  # Backspace / Delete
+            self.class_input_buffer = self.class_input_buffer[:-1]
+            return True
+        if ord("0") <= key <= ord("9") and len(self.class_input_buffer) < 2:
+            self.class_input_buffer += chr(key)
+            # Auto-apply when exactly 2 digits entered.
+            if len(self.class_input_buffer) == 2:
+                self._apply_class_input()
+            return True
+        return True  # consume all other keys silently while typing
 
     def handle_key(self, key):
         label_path = self.get_label_path(self.current_img_path)
 
+        if self.class_input_mode:
+            self.handle_class_input_key(key)
+            return "stay"
+
+        if key == ord("/"):
+            self.class_input_mode = True
+            self.class_input_buffer = ""
+            print("Class input mode. Type 0-16 then press Enter (Esc to cancel).")
+            return "stay"
+
         if ord("0") <= key <= ord("9"):
-            self.current_class = key - ord("0")
-            print(f"Class -> {self.current_class}:{self.classes[self.current_class]}")
+            self.set_class(key - ord("0"))
             return "stay"
 
         if key == ord("j"):
-            self.current_class = (self.current_class - 1) % len(self.classes)
-            print(f"Class -> {self.current_class}:{self.classes[self.current_class]}")
+            self.set_class((self.current_class - 1) % len(self.classes))
             return "stay"
 
         if key == ord("k"):
-            self.current_class = (self.current_class + 1) % len(self.classes)
-            print(f"Class -> {self.current_class}:{self.classes[self.current_class]}")
+            self.set_class((self.current_class + 1) % len(self.classes))
             return "stay"
 
         if key == ord("u") and self.boxes:
@@ -298,6 +401,7 @@ class LabelTool:
         print(f"Images folder: {self.images_folder}")
         print(f"Labels folder: {self.labels_folder}")
         print(f"Total images: {len(self.images)}")
+        print(f"Classes: {len(self.classes)}")
 
         while 0 <= self.current_index < len(self.images):
             action = self.run_single_image(self.images[self.current_index])

@@ -1,7 +1,0 @@
-path: dataset_sub
-train: images/train
-val: images/val
-
-names:
-  0: sub_count
-  1: sub_money

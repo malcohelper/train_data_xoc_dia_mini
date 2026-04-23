@@ -1,249 +1,81 @@
-# realtime_capture.py - Capture và detect real-time
-import mss
-import cv2
-import numpy as np
-from detector import XocDiaDetector
+"""Real-time screen capture + detect + pipeline-analyze for Xoc Dia.
+
+Rewritten for the 17-class single-stage schema:
+- Uses ``XocDiaDetector`` + ``GameAnalysisPipeline`` (no sub_model).
+- Overlay rendering uses shared ``classes.COLORS`` + detector.annotate.
+- When a new round id is detected, the frame and GameState are persisted
+  into ``rounds/<round_id>_<timestamp>.(png|json)`` like before.
+
+Hotkeys:
+    r  select capture region by drag-select on full screen
+    s  save current preview frame to preview_capture.png
+    q  quit
+"""
+
+import json
 import time
+from dataclasses import asdict, is_dataclass
+from datetime import datetime
 from pathlib import Path
 
+import cv2
+import mss
+import numpy as np
 
-def resolve_model_path(model_path, fallback_pattern):
-    path = Path(model_path)
+from detector import XocDiaDetector  # noqa: F401 - kept for external callers
+from pipeline import GameAnalysisPipeline
+
+
+def resolve_weights(weights: str, fallback_pattern: str = "runs/**/weights/best.pt") -> str:
+    path = Path(weights)
     if path.exists():
         return str(path)
+    candidates = sorted(
+        Path(".").glob(fallback_pattern),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return str(candidates[0]) if candidates else weights
 
-    candidates = sorted(Path(".").glob(fallback_pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-    if candidates:
-        return str(candidates[0])
-    return model_path
 
 class RealtimeCapture:
-    def __init__(self, model_path='best.pt', sub_model_path=None):
-        resolved_stage1 = resolve_model_path(model_path, "runs/**/weights/best.pt")
-        resolved_stage2 = None
-        if sub_model_path:
-            resolved_stage2 = resolve_model_path(sub_model_path, "runs/**/sub*/weights/best.pt")
+    def __init__(
+        self,
+        weights: str = "runs/detect/xocdia/weights/best.pt",
+        conf: float = 0.4,
+        imgsz: int = 800,
+        device=None,
+    ):
+        resolved = resolve_weights(weights)
+        print(f"Model weights: {resolved}")
 
-        print(f"📦 Stage 1 model: {resolved_stage1}")
-        if resolved_stage2:
-            print(f"📦 Stage 2 model: {resolved_stage2}")
-        else:
-            print("📦 Stage 2 model: not found, running stage 1 only")
-
-        self.detector = XocDiaDetector(model_path=resolved_stage1, sub_model_path=resolved_stage2)
+        self.pipeline = GameAnalysisPipeline(
+            weights=resolved, conf=conf, imgsz=imgsz, device=device,
+        )
+        self.detector = self.pipeline.detector  # alias for overlay
         self.sct = mss.mss()
 
-        # Default capture region (can be changed live with ROI selector)
-        self.monitor = {
-            "top": 0,
-            "left": 0,
-            "width": 1280,
-            "height": 800,
-        }
-
-        self.last_round_id = None
+        self.monitor = {"top": 0, "left": 0, "width": 1280, "height": 800}
         self.preview_window = "XocDia Preview"
-        self.last_result = None
+        self.last_round_id = None
+        self.last_state = None
+        self.last_frame = None
         self.running = True
 
-    def start(self, interval=2, show_preview=True):
-        """
-        Start real-time detection
-        interval: seconds between captures
-        """
-        print("🎮 Starting real-time detection...")
-        print("⌨️  Hotkeys: r=select game region | s=save current frame | q=quit")
+    # ---------- capture ----------
+    def capture(self) -> np.ndarray:
+        img = np.array(self.sct.grab(self.monitor))
+        return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
-        last_detect_ts = 0.0
-
-        while self.running:
-            try:
-                screenshot = self.capture()
-                now = time.time()
-
-                if now - last_detect_ts >= interval:
-                    cv2.imwrite("temp_capture.png", screenshot)
-                    result = self.detector.detect_image(screenshot)
-                    self.last_result = result
-                    last_detect_ts = now
-                    self.handle_result(result, screenshot)
-
-                if show_preview:
-                    self.show_preview(screenshot)
-                    key = cv2.waitKey(1) & 0xFF
-                    self.handle_hotkeys(key, screenshot)
-
-                time.sleep(0.03)
-            except KeyboardInterrupt:
-                print("\n👋 Stopped")
-                break
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                time.sleep(0.2)
-
-        if show_preview:
-            cv2.destroyAllWindows()
-
-    def handle_result(self, result, screenshot):
-        """Print and persist only when a new round is detected."""
-        if result["roundId"] and result["roundId"] != self.last_round_id:
-            print("\n" + "=" * 60)
-            print(f"🎲 NEW ROUND: {result['roundId']}")
-            print(f"⏱️  Timer: {result['timer']}s")
-            print(f"🏆 Winner: {result['winner']}")
-            print(f"🎯 Dice: {result['diceCount']['red']} đỏ, {result['diceCount']['white']} trắng")
-            print(f"📊 Result: {result['result']}")
-            for area_name, area_info in result.get("betAreas", {}).items():
-                if area_info.get("isActive"):
-                    print(
-                        f"🧩 {area_name}: count={area_info.get('sub_count')} | "
-                        f"money={area_info.get('sub_money')}"
-                    )
-            print("=" * 60 + "\n")
-
-            self.last_round_id = result["roundId"]
-            self.save_round(result, screenshot)
-
-    def show_preview(self, screenshot):
-        """Render preview window to help align capture region."""
-        preview = screenshot.copy()
-        h, w = preview.shape[:2]
-
-        cv2.putText(
-            preview,
-            f"Region: left={self.monitor['left']} top={self.monitor['top']} w={self.monitor['width']} h={self.monitor['height']}",
-            (10, 24),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 255),
-            2,
-        )
-        cv2.putText(
-            preview,
-            "Hotkeys: r=select region | s=save frame | q=quit",
-            (10, 48),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.55,
-            (255, 255, 255),
-            1,
-        )
-
-        if self.last_result:
-            self.draw_detection_overlay(preview, self.last_result)
-            info = (
-                f"Round={self.last_result.get('roundId')} "
-                f"Timer={self.last_result.get('timer')} "
-                f"Winner={self.last_result.get('winner')} "
-                f"Pass={self.last_result.get('detectionPass', 'primary')}"
-            )
-            cv2.putText(
-                preview,
-                info,
-                (10, max(70, h - 20)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.55,
-                (0, 255, 0),
-                2,
-            )
-
-        cv2.imshow(self.preview_window, preview)
-
-    def draw_detection_overlay(self, frame, result):
-        """Draw detected boxes and labels onto preview frame."""
-        colors = {
-            "round_id": (255, 255, 0),
-            "timer": (0, 255, 255),
-            "new_round": (80, 200, 255),
-            "area_chan": (0, 165, 255),
-            "area_le": (0, 255, 0),
-            "area_4_red": (255, 255, 0),
-            "area_3w_1r": (255, 0, 0),
-            "area_3r_1w": (255, 0, 255),
-            "area_4_white": (128, 0, 128),
-            "4r": (0, 0, 255),
-            "4w": (220, 220, 220),
-            "3w1r": (255, 80, 80),
-            "3r1w": (255, 120, 200),
-            "2w2r": (180, 180, 0),
-            "sub_count": (255, 255, 255),
-            "sub_money": (0, 215, 255),
-        }
-
-        regions = result.get("regions", {})
-        for key in ("round_id", "timer", "new_round"):
-            item = regions.get(key, {})
-            bbox = item.get("bbox")
-            if not bbox:
-                continue
-            label = key
-            if key == "round_id" and result.get("roundId"):
-                label = f"round_id: {result['roundId']}"
-            if key == "timer" and result.get("timer") is not None:
-                label = f"timer: {result['timer']}"
-            if key == "new_round":
-                label = f"new_round: {result.get('isNewRound')}"
-            self._draw_box_with_label(frame, bbox, label, colors[key], thickness=2)
-
-        for area_name, area_info in result.get("betAreas", {}).items():
-            bbox = area_info.get("bbox")
-            if not bbox:
-                continue
-
-            area_label = area_name
-            if area_info.get("sub_count") is not None or area_info.get("sub_money") is not None:
-                area_label += f" | c={area_info.get('sub_count')} m={area_info.get('sub_money')}"
-
-            color = colors.get(area_name, (200, 200, 200))
-            thickness = 3 if result.get("detectedArea") == area_name else 2
-            self._draw_box_with_label(frame, bbox, area_label, color, thickness=thickness)
-
-            for sub_box in area_info.get("sub_boxes", []):
-                sub_bbox = sub_box.get("bbox")
-                sub_class = sub_box.get("class")
-                if not sub_bbox or not sub_class:
-                    continue
-                self._draw_box_with_label(
-                    frame,
-                    sub_bbox,
-                    sub_class,
-                    colors.get(sub_class, (180, 180, 180)),
-                    thickness=1,
-                )
-
-    def _draw_box_with_label(self, frame, bbox, label, color, thickness=2):
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-
-        text_y = y1 - 8 if y1 > 20 else y1 + 18
-        cv2.putText(
-            frame,
-            str(label),
-            (x1, text_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color,
-            2,
-        )
-
-    def handle_hotkeys(self, key, screenshot):
-        if key == ord("q"):
-            self.running = False
-        elif key == ord("r"):
-            self.select_region_with_mouse()
-        elif key == ord("s"):
-            cv2.imwrite("preview_capture.png", screenshot)
-            print("💾 Saved current preview frame -> preview_capture.png")
-
-    def select_region_with_mouse(self):
-        """
-        Press hotkey 'r' to select game area by drag-and-drop once.
-        """
+    def select_region_with_mouse(self) -> None:
         full_monitor = self.sct.monitors[1]
         full_img = np.array(self.sct.grab(full_monitor))
         full_img = cv2.cvtColor(full_img, cv2.COLOR_BGRA2BGR)
 
-        print("🖱️  Drag to select game region, then press ENTER/SPACE. ESC to cancel.")
-        x, y, w, h = cv2.selectROI("Select Game Region", full_img, showCrosshair=True, fromCenter=False)
+        print("Drag to select game region, then press ENTER/SPACE. ESC to cancel.")
+        x, y, w, h = cv2.selectROI(
+            "Select Game Region", full_img, showCrosshair=True, fromCenter=False,
+        )
         cv2.destroyWindow("Select Game Region")
 
         if w > 0 and h > 0:
@@ -253,36 +85,127 @@ class RealtimeCapture:
                 "width": int(w),
                 "height": int(h),
             }
-            print(f"✅ Updated region: {self.monitor}")
+            print(f"Updated region: {self.monitor}")
         else:
-            print("ℹ️  Region selection cancelled.")
+            print("Region selection cancelled.")
 
-    def capture(self):
-        """Capture screen"""
-        img = np.array(self.sct.grab(self.monitor))
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        return img
-    
-    def save_round(self, result, screenshot):
-        """Save round data"""
-        import json
-        from datetime import datetime
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        round_id = result['roundId'].replace('#', '')
-        Path("rounds").mkdir(exist_ok=True)
-        
-        # Save image
-        cv2.imwrite(f'rounds/{round_id}_{timestamp}.png', screenshot)
-        
-        # Save JSON
-        with open(f'rounds/{round_id}_{timestamp}.json', 'w') as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
+    # ---------- main loop ----------
+    def start(self, interval: float = 2.0, show_preview: bool = True) -> None:
+        print("Starting real-time detection. Hotkeys: r / s / q")
+        last_detect = 0.0
+        while self.running:
+            try:
+                frame = self.capture()
+                self.last_frame = frame
+                now = time.time()
 
-# Run
+                if now - last_detect >= interval:
+                    state = self.pipeline.analyze(frame)
+                    self.last_state = state
+                    last_detect = now
+                    self._handle_state(state, frame)
+
+                if show_preview:
+                    self._render_preview(frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    self._handle_hotkeys(key, frame)
+
+                time.sleep(0.03)
+            except KeyboardInterrupt:
+                print("Stopped.")
+                break
+            except Exception as exc:  # noqa: BLE001 - visibility in realtime loop
+                print(f"Loop error: {exc}")
+                time.sleep(0.2)
+
+        if show_preview:
+            cv2.destroyAllWindows()
+
+    # ---------- state handling ----------
+    def _handle_state(self, state, frame: np.ndarray) -> None:
+        if state.round_id and state.round_id != self.last_round_id:
+            print("=" * 60)
+            print(f"NEW ROUND {state.round_id} | phase={state.phase} timer={state.timer}")
+            print(f"Dice  : {state.dice_result}")
+            for bet_type, bet in state.bets.items():
+                print(
+                    f"  {bet_type:<8} percent={bet.percent:<5} "
+                    f"total_bet={bet.total_bet:<8} count={bet.total_count}"
+                )
+            print("=" * 60)
+            self.last_round_id = state.round_id
+            self._save_round(state, frame)
+
+    def _save_round(self, state, frame: np.ndarray) -> None:
+        rounds_dir = Path("rounds")
+        rounds_dir.mkdir(exist_ok=True)
+        round_id = (state.round_id or "unknown").replace("#", "")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = rounds_dir / f"{round_id}_{ts}"
+        cv2.imwrite(f"{base}.png", frame)
+        payload = state.to_dict() if hasattr(state, "to_dict") else (
+            asdict(state) if is_dataclass(state) else {}
+        )
+        with open(f"{base}.json", "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+
+    # ---------- rendering ----------
+    def _render_preview(self, frame: np.ndarray) -> None:
+        preview = frame.copy()
+        h, w = preview.shape[:2]
+
+        cv2.putText(
+            preview,
+            f"Region left={self.monitor['left']} top={self.monitor['top']} "
+            f"w={self.monitor['width']} h={self.monitor['height']}",
+            (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2,
+        )
+        cv2.putText(
+            preview,
+            "Hotkeys: r=region | s=save frame | q=quit",
+            (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
+        )
+
+        if self.last_state:
+            preview = self.detector.annotate(preview, self.last_state.raw_detections)
+            state = self.last_state
+            info = (
+                f"phase={state.phase} round={state.round_id} timer={state.timer} "
+                f"dice={state.dice_result}"
+            )
+            cv2.putText(
+                preview, info,
+                (10, max(70, h - 20)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2,
+            )
+
+        cv2.imshow(self.preview_window, preview)
+
+    def _handle_hotkeys(self, key: int, frame: np.ndarray) -> None:
+        if key == ord("q"):
+            self.running = False
+        elif key == ord("r"):
+            self.select_region_with_mouse()
+        elif key == ord("s"):
+            cv2.imwrite("preview_capture.png", frame)
+            print("Saved preview_capture.png")
+
+
+def _parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--weights", default="runs/detect/xocdia/weights/best.pt")
+    parser.add_argument("--interval", type=float, default=2.0)
+    parser.add_argument("--conf", type=float, default=0.4)
+    parser.add_argument("--imgsz", type=int, default=800)
+    parser.add_argument("--device", default=None)
+    parser.add_argument("--no-preview", action="store_true")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    capture = RealtimeCapture(
-        model_path='runs/detect/train/weights/best.pt',
-        sub_model_path='runs/detect/sub_train/weights/best.pt'
+    args = _parse_args()
+    cap = RealtimeCapture(
+        weights=args.weights, conf=args.conf, imgsz=args.imgsz, device=args.device,
     )
-    capture.start(interval=2, show_preview=True)  # Check mỗi 2s
+    cap.start(interval=args.interval, show_preview=not args.no_preview)

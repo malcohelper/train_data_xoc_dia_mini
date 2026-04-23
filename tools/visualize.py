@@ -16,11 +16,13 @@ Interactive keys (when not using --save-dir):
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import cv2
 
-from label_tool import CLASSES, COLORS
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from classes import CLASSES, COLORS
 
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")

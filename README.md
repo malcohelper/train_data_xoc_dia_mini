@@ -85,8 +85,9 @@ PERCENT: chan 58% | 4_red 12% | 4_white 12% | le 42% | 3r_1w 33% | 3w_1r 42%
 ============================================================
 ```
 
-The row order is `PERCENT_ROW_ORDER` (defined in `pipeline.py`, mirrored in
-`realtime_capture.py`). Edit that list if the scoreboard layout changes.
+The row order is `PERCENT_ROW_ORDER`, defined once in `pipeline.py` and
+imported from there by `realtime_capture.py`. Edit that single list if the
+scoreboard layout changes.
 
 ## Install
 

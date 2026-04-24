@@ -1,16 +1,22 @@
-# Xoc Dia Detector (17-class, single-stage)
+# Xoc Dia Detector (15-class, single-stage)
 
 Single-stage YOLOv8 + PaddleOCR pipeline for the Xoc Dia game UI. One YOLO
-model detects all 17 UI elements (state / areas / dice / text cells), then a
+model detects all 15 UI elements (state / areas / dice / text cells), then a
 small post-processing pass uses PaddleOCR to read the text inside each
 detected cell and a geometric mapping step figures out which bet type each
 cell belongs to.
 
+Round boundaries are detected on the fly by a lightweight state machine:
+`timer` ≥ 46 signals a new round (scoreboard percent is captured then);
+`dice_*` signals the end of a round (bets / counts / result are logged and
+the round JSON is persisted). No `round_id` or `new_round` class is needed
+— round IDs are timestamp-based.
+
 ## Pipeline
 
 ```
-Frame ─► YOLOv8 (17 classes) ─► Group by category
-                                ├─ state:   round_id, timer, new_round
+Frame ─► YOLOv8 (15 classes) ─► Group by category
+                                ├─ state:   timer
                                 ├─ area:    6 anchors (chan/le/4_red/...)
                                 ├─ dice:    5 outcomes (4r/4w/3w1r/3r1w/2w2r)
                                 └─ cell:    percent / total_bet / total_count
@@ -22,22 +28,66 @@ Frame ─► YOLOv8 (17 classes) ─► Group by category
                                  Geometric map cell → bet_type
                                                │
                                                ▼
-                                        GameState dict
+                                    GameState (per-frame)
+                                               │
+                                               ▼
+                              RoundTracker (multi-frame state machine)
+                                               │
+                                               ▼
+                              1 log line + rounds/<ts>.json per round
 ```
 
-## Class schema (17 classes)
+## Class schema (15 classes)
 
-| Group | IDs | Classes |
-|---|---|---|
-| State | 0–2 | `round_id`, `timer`, `new_round` |
-| Areas | 3–8 | `area_chan`, `area_le`, `area_4_red`, `area_3w_1r`, `area_3r_1w`, `area_4_white` |
-| Dice  | 9–13 | `dice_4r`, `dice_4w`, `dice_3w1r`, `dice_3r1w`, `dice_2w2r` |
-| Cells | 14–16 | `percent_cell`, `total_bet_cell`, `total_count_cell` |
+| Group | IDs  | Classes |
+|-------|------|---------|
+| State | 0    | `timer` |
+| Areas | 1–6  | `area_chan`, `area_le`, `area_4_red`, `area_3w_1r`, `area_3r_1w`, `area_4_white` |
+| Dice  | 7–11 | `dice_4r`, `dice_4w`, `dice_3w1r`, `dice_3r1w`, `dice_2w2r` |
+| Cells | 12–14| `percent_cell`, `total_bet_cell`, `total_count_cell` |
 
-Text cells use generic classes (6 instances per frame) and are assigned to
-their owning bet type downstream via geometric containment against the
-`area_*` anchors. Defined once in [`classes.py`](classes.py); everything
-imports from there.
+Text cells use generic classes (up to 6 instances per frame) and are
+assigned to their owning bet type downstream via geometric containment
+against the `area_*` anchors. Defined once in [`classes.py`](classes.py);
+everything imports from there.
+
+## Round state machine
+
+Round tracking lives in `realtime_capture.RoundTracker`:
+
+```
+IDLE
+  │  timer transitions from <46 (or None) to >=46 on a fresh frame
+  ▼
+ACTIVE  ─► capture scoreboard percent (done once, scoreboard stable)
+  │       keep refreshing total_bet / total_count every frame
+  │
+  │  dice_* detected
+  ▼
+LOG 1x  ─► format + print log, save rounds/<ts>.json
+  │
+  ▼
+IDLE (wait for next timer>=46)
+```
+
+Log format:
+
+```
+============================================================
+ROUND 20260423_220512 | Dice: 3w_1r
+  chan     total_bet=272K     count=35
+  4_red    total_bet=730K     count=21
+  4_white  total_bet=795K     count=35
+  le       total_bet=602K     count=24
+  3r_1w    total_bet=4062     count=27
+  3w_1r    total_bet=701K     count=42
+PERCENT: chan 58% | 4_red 12% | 4_white 12% | le 42% | 3r_1w 33% | 3w_1r 42%
+============================================================
+```
+
+The row order is `PERCENT_ROW_ORDER`, defined once in `pipeline.py` and
+imported from there by `realtime_capture.py`. Edit that single list if the
+scoreboard layout changes.
 
 ## Install
 
@@ -55,22 +105,23 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 .
 ├── classes.py                # single source of truth for classes/colors/groups
 ├── xocdia.yaml               # YOLO data config (must match classes.py)
-├── label_tool.py             # fast label GUI (17-class + text-input picker)
+├── label_tool.py             # fast label GUI (15-class + text-input picker)
 ├── train.py                  # train YOLOv8 (game-UI tuned defaults)
 ├── detector.py               # lightweight XocDiaDetector API + CLI
 ├── ocr_engine.py             # PaddleOCR wrapper
-├── pipeline.py               # GameAnalysisPipeline (detect + OCR + map)
-├── realtime_capture.py       # screen-grab + live analysis + rounds/ dump
+├── pipeline.py               # per-frame GameAnalysisPipeline
+├── realtime_capture.py       # screen-grab + state machine + rounds/ dump
 ├── split_dataset.py          # 80/20 train/val split
 ├── dataset/
 │   ├── images/{raw,train,val}
 │   └── labels/{raw,train,val}
 ├── rounds/                   # per-round PNG + JSON snapshots
 └── tools/
-    ├── rounds_to_dataset.py  # copy rounds/*.png into dataset/images/raw/
-    ├── visualize.py          # preview YOLO labels over images
-    ├── check_labels.py       # label QA / imbalance warnings
-    └── eval.py               # per-class mAP / P / R on the val split
+    ├── rounds_to_dataset.py          # copy rounds/*.png into dataset/images/raw/
+    ├── migrate_labels_15class.py     # one-shot: 17-class -> 15-class label remap
+    ├── visualize.py                  # preview YOLO labels over images
+    ├── check_labels.py               # label QA / imbalance warnings
+    └── eval.py                       # per-class mAP / P / R on the val split
 ```
 
 ## End-to-end workflow
@@ -78,7 +129,9 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 ### 1. Collect frames
 
 ```bash
-# Live capture (writes rounds/<round_id>_<ts>.{png,json} on each new round).
+# Live capture (writes rounds/<ts>.json once per finished round).
+# PNG is NOT saved from the realtime loop anymore (kept it lightweight).
+# Use tools/rounds_to_dataset.py on previously-captured PNGs if you need them.
 python realtime_capture.py
 ```
 
@@ -103,12 +156,12 @@ Hotkeys:
 | Key | Action |
 |---|---|
 | `0–9` | jump to class 0–9 |
-| `/` then `NN` then `Enter` | jump to class N (0–16) via text input |
+| `/` then `NN` then `Enter` | jump to class N (0–14) via text input |
 | `j` / `k` | prev / next class |
 | `u` | undo last box |
 | `x` | clear all boxes of current class |
 | `c` | copy boxes from previous image |
-| `s` | save | 
+| `s` | save |
 | `p` / `space` / `n` | prev / next image |
 | `a` | toggle autosave |
 | `t` | toggle auto-next-class after draw |
@@ -166,7 +219,7 @@ python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
 ## Dataset sizing
 
 - Minimum workable: ~80–100 labeled frames covering all phases (betting,
-  bowl-opens, new-round banner).
+  bowl-opens, transitions).
 - Comfortable: 150–250 frames. Text cells benefit from variety of values
   (different `xxM` amounts, different % splits).
 - Keep ~20% for val. Use `split_dataset.py`.
@@ -175,8 +228,7 @@ python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
 
 `pipeline.GameAnalysisPipeline.analyze(frame)` returns a `GameState` with:
 
-- `phase`: `new_round` / `betting` / `result` / `transition`
-- `round_id`: OCR'd round id (e.g. `"2777221"`)
+- `phase`: `betting` / `result` / `transition`
 - `timer`: OCR'd timer string
 - `dice_result`: one of `4_red` / `4_white` / `3w_1r` / `3r_1w` / `2w_2r` (or `None`)
 - `bets[bet_type]`: `BetState(percent, total_bet, total_count, area_bbox)`
@@ -192,6 +244,29 @@ Cell assignment rules:
   `PERCENT_ROW_ORDER` constant in `pipeline.py`. Adjust that list if the
   game layout swaps rows.
 
+## Migrating from the old 17-class schema
+
+If you already labeled data against the old 17-class schema (with
+`round_id` and `new_round`), run the one-shot remapper once:
+
+```bash
+python tools/migrate_labels_15class.py            # dry-run preview
+python tools/migrate_labels_15class.py --apply    # rewrite in place
+```
+
+It drops all `round_id` / `new_round` boxes and shifts the remaining class
+IDs down to fill the gaps.
+
+**Idempotency via sentinel file.** On success the tool writes a sentinel
+file `dataset/labels/.migrated_to_15class` and refuses to run again
+unless you pass `--force`. This is the only reliable guard: the two
+schemas share class IDs `0..14`, so you cannot distinguish an
+already-migrated file from an old-schema file that merely happens not to
+contain `total_bet_cell`/`total_count_cell` boxes. Running on already-
+migrated labels corrupts class IDs, hence the hard stop. The dataset
+shipped in this repo already has the sentinel, so pulling main and
+running `--apply` is a no-op.
+
 ## Troubleshooting
 
 - `ModuleNotFoundError: paddle` → `pip install paddlepaddle` (CPU) or the
@@ -200,6 +275,9 @@ Cell assignment rules:
   check imbalance warnings and labeled bbox quality with `tools/visualize.py`.
 - Small text cells missed at `imgsz=640` → re-run training with
   `--imgsz 800` (default) or higher.
+- OCR returns garbage like `WBEL` / `Ell` → bboxes are too loose. Re-label
+  the offending frames so the box hugs **only** the digits (no surrounding
+  frame / icon / whitespace). See the labeling guide in the PR description.
 - Dice class confused at low data → ensure each dice outcome has at least
   ~20 labeled frames; dice variants are visually distinct so data volume
   dominates.

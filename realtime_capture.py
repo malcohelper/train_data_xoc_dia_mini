@@ -131,6 +131,11 @@ class RoundTracker:
             and (self.last_timer is None or self.last_timer < TIMER_NEW_ROUND_THRESHOLD)
         )
         if just_started:
+            if self.current is not None and self.current.dice_result is None:
+                print(
+                    f"[WARN] Abandoning in-progress round {self.current.round_id} "
+                    f"(no dice result observed before next round started)."
+                )
             self._start_new_round(state)
 
         # We're inside an active round -> keep updating bets/percent.
@@ -172,6 +177,13 @@ class RoundTracker:
 
     def _save_round(self, rd: Round, frame: np.ndarray) -> None:
         base = self.rounds_dir / rd.round_id
+        # Collision-safe: if two rounds somehow share the second, append
+        # -1 / -2 / ... so we never overwrite an existing snapshot.
+        if Path(f"{base}.png").exists() or Path(f"{base}.json").exists():
+            i = 1
+            while Path(f"{base}-{i}.png").exists() or Path(f"{base}-{i}.json").exists():
+                i += 1
+            base = self.rounds_dir / f"{rd.round_id}-{i}"
         cv2.imwrite(f"{base}.png", frame)
         with open(f"{base}.json", "w", encoding="utf-8") as f:
             json.dump(rd.to_dict(), f, indent=2, ensure_ascii=False)

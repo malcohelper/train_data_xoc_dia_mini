@@ -252,8 +252,11 @@ python tools/migrate_labels_15class.py --apply    # rewrite in place
 ```
 
 It drops all `round_id` / `new_round` boxes and shifts the remaining class
-IDs down to fill the gaps. Safe to run repeatedly: files already in the
-15-class range are left untouched (non-existent old IDs become no-ops).
+IDs down to fill the gaps. Idempotent: the tool uses the presence of an
+old-only class id (`15` or `16`) as the signal that a file still needs
+migrating. Files already in the 15-class range (all ids in `0..14` with
+no `15`/`16`) are detected and skipped, so re-running the script on an
+already-migrated tree is safe.
 
 ## Troubleshooting
 

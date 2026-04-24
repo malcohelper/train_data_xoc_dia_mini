@@ -66,8 +66,42 @@ def parse_args():
     return parser.parse_args()
 
 
+# Class IDs that only existed in the OLD 17-class schema. Their presence
+# is the positive signal that a file still needs migrating. If none of
+# these appear in a file, the file is already in the 15-class schema and
+# we MUST NOT touch it (otherwise we would eat `timer`/`area_le` boxes).
+OLD_ONLY_IDS = {15, 16}
+
+
+def _class_ids_in(path: Path) -> set:
+    ids = set()
+    for line in path.read_text().splitlines():
+        parts = line.strip().split()
+        if len(parts) != 5:
+            continue
+        try:
+            ids.add(int(parts[0]))
+        except ValueError:
+            continue
+    return ids
+
+
 def migrate_file(path: Path, apply: bool) -> dict:
-    stats = {"dropped": 0, "remapped": 0, "kept_lines": 0, "unknown": 0}
+    stats = {
+        "dropped": 0,
+        "remapped": 0,
+        "kept_lines": 0,
+        "unknown": 0,
+        "skipped_already_migrated": 0,
+    }
+
+    ids = _class_ids_in(path)
+    # Idempotency guard: a file without any old-only id (15 or 16) and with
+    # every id in the 15-class range is already migrated - leave it alone.
+    if ids and not (ids & OLD_ONLY_IDS) and all(0 <= i <= 14 for i in ids):
+        stats["skipped_already_migrated"] = 1
+        return stats
+
     lines = path.read_text().splitlines()
     out_lines = []
     for raw in lines:
@@ -91,7 +125,10 @@ def migrate_file(path: Path, apply: bool) -> dict:
             stats["remapped"] += 1
             stats["kept_lines"] += 1
             continue
-        # Unknown class id (out of old schema) -> drop with warning.
+        # Unknown class id (outside both old and new schemas). Preserve
+        # the raw line so nothing is silently deleted - the operator can
+        # inspect the file after the run.
+        out_lines.append(raw)
         stats["unknown"] += 1
 
     if apply:
@@ -114,10 +151,14 @@ def main() -> int:
 
     total = defaultdict(int)
     changed_files = 0
+    skipped_files = 0
     for f in files:
         stats = migrate_file(f, apply=args.apply)
         for k, v in stats.items():
             total[k] += v
+        if stats["skipped_already_migrated"]:
+            skipped_files += 1
+            continue
         if stats["dropped"] or stats["remapped"] or stats["unknown"]:
             changed_files += 1
 
@@ -126,9 +167,10 @@ def main() -> int:
     print(f"Root              : {root}")
     print(f"Files scanned     : {len(files)}")
     print(f"Files affected    : {changed_files}")
+    print(f"Files skipped     : {skipped_files}  (already in 15-class schema)")
     print(f"Boxes remapped    : {total['remapped']}")
     print(f"Boxes dropped     : {total['dropped']}  (class 0 round_id + class 2 new_round)")
-    print(f"Unknown/malformed : {total['unknown']}")
+    print(f"Unknown (kept)    : {total['unknown']}  (class ids outside both schemas)")
     if not args.apply:
         print("\nRun again with --apply to write changes in place.")
     return 0

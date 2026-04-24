@@ -112,7 +112,9 @@ class RoundTracker:
         self.rounds_dir.mkdir(exist_ok=True)
         self.percent_row_order = list(percent_row_order or PERCENT_ROW_ORDER)
 
-        self.phase: str = "idle"      # idle | active
+        # State is derived from (self.current, self.last_timer). No need
+        # for a separate phase field; adding one tends to drift out of
+        # sync with the real transitions.
         self.current: Optional[Round] = None
         self.last_timer: Optional[int] = None
 

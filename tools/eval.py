@@ -52,19 +52,22 @@ def main():
     print(f"Precision  : {metrics.box.mp:.4f}")
     print(f"Recall     : {metrics.box.mr:.4f}")
 
-    # Per-class metrics. Ultralytics exposes arrays indexed by class ID.
-    # Some classes may have no validation instances -> guard with len check.
-    p = getattr(metrics.box, "p", []) or []
-    r = getattr(metrics.box, "r", []) or []
-    maps = getattr(metrics.box, "maps", []) or []
+    # Per-class metrics. Ultralytics exposes numpy arrays indexed by class ID.
+    p = getattr(metrics.box, "p", None)
+    r = getattr(metrics.box, "r", None)
+    maps = getattr(metrics.box, "maps", None)
     ap50s = getattr(metrics.box, "ap50", None)
+    p = p if p is not None and len(p) else []
+    r = r if r is not None and len(r) else []
+    maps = maps if maps is not None and len(maps) else []
+    ap50s = ap50s if ap50s is not None and len(ap50s) else []
 
     print("\n=== Per class ===")
     print(f"{'id':>3}  {'name':<20} {'P':>7} {'R':>7} {'mAP50':>7} {'mAP50-95':>9}")
     for cid, name in CLASSES.items():
         p_v = float(p[cid]) if cid < len(p) else float("nan")
         r_v = float(r[cid]) if cid < len(r) else float("nan")
-        m50 = float(ap50s[cid]) if ap50s is not None and cid < len(ap50s) else float("nan")
+        m50 = float(ap50s[cid]) if len(ap50s) and cid < len(ap50s) else float("nan")
         m = float(maps[cid]) if cid < len(maps) else float("nan")
         print(f"{cid:>3}  {name:<20} {p_v:>7.3f} {r_v:>7.3f} {m50:>7.3f} {m:>9.3f}")
 

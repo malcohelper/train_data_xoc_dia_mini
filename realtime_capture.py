@@ -128,9 +128,12 @@ class RealtimeCapture:
             print(f"NEW ROUND {state.round_id} | phase={state.phase} timer={state.timer}")
             print(f"Dice  : {state.dice_result}")
             for bet_type, bet in state.bets.items():
+                pct = bet.percent or "-"
+                tb = bet.total_bet or "-"
+                tc = bet.total_count or "-"
                 print(
-                    f"  {bet_type:<8} percent={bet.percent:<5} "
-                    f"total_bet={bet.total_bet:<8} count={bet.total_count}"
+                    f"  {bet_type:<8} percent={pct:<5} "
+                    f"total_bet={tb:<8} count={tc}"
                 )
             print("=" * 60)
             self.last_round_id = state.round_id

@@ -1,25 +1,25 @@
-"""Full game-analysis pipeline: YOLO detect -> OCR -> structured state.
+"""Per-frame game-analysis pipeline: YOLO detect -> OCR -> structured state.
+
+Round boundaries and the full "log 1 line per round" behaviour live in
+``realtime_capture.RoundTracker``; this module only reports what is visible
+in a single frame. The tracker decides when to log.
 
 Flow per frame:
-    1. Run XocDiaDetector to get 17-class detections.
+    1. Run XocDiaDetector to get 15-class detections.
     2. Group by category (state / area / dice / cell).
-    3. For each text cell:
+    3. Read timer (state category) and dice_result (dice category).
+    4. For each text cell:
        - total_bet_cell  / total_count_cell: geometrically assign to the
          area_* that contains the cell's center.
        - percent_cell: the 6 scoreboard-% cells live ABOVE the play area,
          not inside any area_* bbox, so map them by y-order using
          PERCENT_ROW_ORDER (configurable).
-    4. OCR each assigned crop via ocr_engine.XocDiaOCR.
-    5. Figure out the current phase:
-         - new_round banner visible   -> "new_round"
+    5. OCR each assigned crop via ocr_engine.XocDiaOCR.
+    6. Figure out the current phase:
          - any dice_* class visible   -> "result"
          - timer visible and > 0      -> "betting"
          - otherwise                  -> "transition"
-    6. Return a GameState dataclass.
-
-The two user-editable pieces in this module:
-    - PERCENT_ROW_ORDER  (how scoreboard rows map to bet types)
-    - GameAnalysisPipeline config args (conf threshold, OCR lang, etc.)
+    7. Return a GameState dataclass.
 
 Example::
 
@@ -48,7 +48,7 @@ PERCENT_ROW_ORDER: List[str] = [
     "4_white",
     "le",
     "3r_1w",
-    "3w_1r"
+    "3w_1r",
 ]
 
 # Short bet-type names (index-aligned with the six area_* classes).
@@ -78,17 +78,25 @@ class BetState:
 
 @dataclass
 class GameState:
-    phase: str = "unknown"                # new_round / betting / result / transition
-    round_id: Optional[str] = None
+    phase: str = "unknown"                # betting / result / transition
     timer: Optional[str] = None
     dice_result: Optional[str] = None     # 4_red / 4_white / 3w_1r / 3r_1w / 2w_2r
     bets: Dict[str, BetState] = field(default_factory=dict)
     raw_detections: List[Detection] = field(default_factory=list)
 
+    # --- derived helpers ---
+    @property
+    def timer_int(self) -> Optional[int]:
+        if self.timer is None:
+            return None
+        try:
+            return int(self.timer)
+        except (ValueError, TypeError):
+            return None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "phase": self.phase,
-            "round_id": self.round_id,
             "timer": self.timer,
             "dice_result": self.dice_result,
             "bets": {
@@ -144,14 +152,14 @@ class GameAnalysisPipeline:
                 bet_type=bet_type, area_bbox=area_det.bbox,
             )
 
-        # 2) State-level fields (round_id, timer, new_round, dice)
+        # 2) State-level fields (timer, dice)
         self._fill_state_fields(frame, state, groups)
 
         # 3) Text cells -> bet slots
         self._fill_bet_cells(frame, state, groups, areas)
 
         # 4) Derive phase.
-        state.phase = self._infer_phase(state, groups)
+        state.phase = self._infer_phase(state)
 
         return state
 
@@ -183,17 +191,10 @@ class GameAnalysisPipeline:
         state: GameState,
         groups: Dict[str, List[Detection]],
     ) -> None:
-        by_class: Dict[str, List[Detection]] = {}
-        for d in groups["state"]:
-            by_class.setdefault(d.class_name, []).append(d)
-
-        if "round_id" in by_class:
-            det = max(by_class["round_id"], key=lambda x: x.conf)
-            text = self.ocr.read_text(self.detector.crop(frame, det))
-            state.round_id = self._clean_round_id(text)
-
-        if "timer" in by_class:
-            det = max(by_class["timer"], key=lambda x: x.conf)
+        state_dets = groups.get("state", [])
+        timer_dets = [d for d in state_dets if d.class_name == "timer"]
+        if timer_dets:
+            det = max(timer_dets, key=lambda x: x.conf)
             text = self.ocr.read_number(self.detector.crop(frame, det))
             state.timer = text
 
@@ -267,28 +268,12 @@ class GameAnalysisPipeline:
         return best[0]
 
     @staticmethod
-    def _clean_round_id(text: Optional[str]) -> Optional[str]:
-        if not text:
-            return None
-        # Normalize common OCR artefacts ("#277...", "# 277...", "2 77...").
-        stripped = text.replace(" ", "").lstrip("#")
-        return stripped or None
-
-    @staticmethod
-    def _infer_phase(
-        state: GameState, groups: Dict[str, List[Detection]],
-    ) -> str:
-        state_by_class = {d.class_name for d in groups.get("state", [])}
-        if "new_round" in state_by_class:
-            return "new_round"
+    def _infer_phase(state: GameState) -> str:
         if state.dice_result is not None:
             return "result"
-        if state.timer is not None:
-            try:
-                if int(state.timer) > 0:
-                    return "betting"
-            except (ValueError, TypeError):
-                return "betting"
+        t = state.timer_int
+        if t is not None and t > 0:
+            return "betting"
         return "transition"
 
 

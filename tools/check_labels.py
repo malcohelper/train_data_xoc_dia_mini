@@ -3,7 +3,7 @@
 Stats printed:
 - Box count per class + number of images containing each class.
 - Images with zero / very few boxes.
-- Labels with invalid class IDs (outside the 17-class schema).
+- Labels with invalid class IDs (outside the 15-class schema).
 - Labels with out-of-range coords (not in [0, 1]).
 - Classes with obvious imbalance (< 10% of the busiest class).
 - Frames that deviate from EXPECTED_INSTANCES_PER_FRAME.

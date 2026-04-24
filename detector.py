@@ -1,4 +1,4 @@
-"""Single-stage YOLOv8 detector for Xoc Dia UI (17-class schema).
+"""Single-stage YOLOv8 detector for Xoc Dia UI (15-class schema).
 
 This module is intentionally lean: it only does detection + light post-
 processing (grouping, annotation). OCR and game-state reasoning live in

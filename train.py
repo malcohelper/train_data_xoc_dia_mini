@@ -1,4 +1,4 @@
-"""Train the single-stage Xoc Dia YOLO detector (17 classes).
+"""Train the single-stage Xoc Dia YOLO detector (15 classes).
 
 Defaults are tuned for UI detection:
 - fliplr/flipud/degrees = 0 (UI is always upright, never mirrored)

@@ -1,0 +1,6 @@
+migrated_at=2026-04-23T22:00:00
+files_scanned=544
+files_affected=544
+remapped=10496
+dropped=565
+note=Applied in PR #5 before this file was committed. Delete this file and pass --force to re-run migration.

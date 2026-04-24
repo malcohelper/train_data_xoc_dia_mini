@@ -17,15 +17,23 @@ New schema (15):
 Classes 0 (round_id) and 2 (new_round) from the old schema are DROPPED.
 All other classes are shifted down to fill the gaps.
 
+Idempotency: on success the tool writes a sentinel file
+``<labels-folder>/.migrated_to_15class`` and refuses to run again unless
+``--force`` is given. This is necessary because the two schemas share
+class IDs 0-14, so we cannot reliably tell an already-migrated file from
+an old-schema file that happens to lack classes 15/16 (e.g. transition
+frames with only `round_id` + `area_*`).
+
 Usage::
 
     python tools/migrate_labels_15class.py                # dry-run
-    python tools/migrate_labels_15class.py --apply        # write changes
-    python tools/migrate_labels_15class.py --apply --labels-folder dataset/labels
+    python tools/migrate_labels_15class.py --apply        # write changes + sentinel
+    python tools/migrate_labels_15class.py --apply --force  # ignore sentinel
 """
 
 import argparse
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 # Dropped class IDs in the OLD schema.
@@ -50,6 +58,9 @@ REMAP = {
     16: 14,  # total_count_cell
 }
 
+# Sentinel written to the labels folder once migration succeeds.
+SENTINEL_NAME = ".migrated_to_15class"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -63,45 +74,20 @@ def parse_args():
         action="store_true",
         help="Write changes in place. Without this flag the script only reports.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Re-run even if the sentinel file indicates this folder was "
+            "already migrated. DANGEROUS: running on 15-class labels will "
+            "corrupt class ids."
+        ),
+    )
     return parser.parse_args()
 
 
-# Class IDs that only existed in the OLD 17-class schema. Their presence
-# is the positive signal that a file still needs migrating. If none of
-# these appear in a file, the file is already in the 15-class schema and
-# we MUST NOT touch it (otherwise we would eat `timer`/`area_le` boxes).
-OLD_ONLY_IDS = {15, 16}
-
-
-def _class_ids_in(path: Path) -> set:
-    ids = set()
-    for line in path.read_text().splitlines():
-        parts = line.strip().split()
-        if len(parts) != 5:
-            continue
-        try:
-            ids.add(int(parts[0]))
-        except ValueError:
-            continue
-    return ids
-
-
 def migrate_file(path: Path, apply: bool) -> dict:
-    stats = {
-        "dropped": 0,
-        "remapped": 0,
-        "kept_lines": 0,
-        "unknown": 0,
-        "skipped_already_migrated": 0,
-    }
-
-    ids = _class_ids_in(path)
-    # Idempotency guard: a file without any old-only id (15 or 16) and with
-    # every id in the 15-class range is already migrated - leave it alone.
-    if ids and not (ids & OLD_ONLY_IDS) and all(0 <= i <= 14 for i in ids):
-        stats["skipped_already_migrated"] = 1
-        return stats
-
+    stats = {"dropped": 0, "remapped": 0, "kept_lines": 0, "unknown": 0}
     lines = path.read_text().splitlines()
     out_lines = []
     for raw in lines:
@@ -144,6 +130,14 @@ def main() -> int:
         print(f"Labels folder not found: {root}")
         return 1
 
+    sentinel = root / SENTINEL_NAME
+    if sentinel.exists() and not args.force:
+        print(
+            f"Sentinel {sentinel} exists - this folder was already migrated.\n"
+            f"Pass --force to re-run anyway (this will CORRUPT 15-class labels)."
+        )
+        return 0
+
     files = sorted(root.rglob("*.txt"))
     if not files:
         print(f"No .txt label files under {root}")
@@ -151,14 +145,10 @@ def main() -> int:
 
     total = defaultdict(int)
     changed_files = 0
-    skipped_files = 0
     for f in files:
         stats = migrate_file(f, apply=args.apply)
         for k, v in stats.items():
             total[k] += v
-        if stats["skipped_already_migrated"]:
-            skipped_files += 1
-            continue
         if stats["dropped"] or stats["remapped"] or stats["unknown"]:
             changed_files += 1
 
@@ -167,11 +157,20 @@ def main() -> int:
     print(f"Root              : {root}")
     print(f"Files scanned     : {len(files)}")
     print(f"Files affected    : {changed_files}")
-    print(f"Files skipped     : {skipped_files}  (already in 15-class schema)")
     print(f"Boxes remapped    : {total['remapped']}")
     print(f"Boxes dropped     : {total['dropped']}  (class 0 round_id + class 2 new_round)")
     print(f"Unknown (kept)    : {total['unknown']}  (class ids outside both schemas)")
-    if not args.apply:
+
+    if args.apply:
+        sentinel.write_text(
+            f"migrated_at={datetime.now().isoformat(timespec='seconds')}\n"
+            f"files_scanned={len(files)}\n"
+            f"files_affected={changed_files}\n"
+            f"remapped={total['remapped']}\n"
+            f"dropped={total['dropped']}\n"
+        )
+        print(f"\nWrote sentinel: {sentinel}")
+    else:
         print("\nRun again with --apply to write changes in place.")
     return 0
 

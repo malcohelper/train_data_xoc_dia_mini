@@ -54,6 +54,14 @@ PERCENT_ROW_ORDER: List[str] = [
 # Short bet-type names (index-aligned with the six area_* classes).
 BET_TYPES: List[str] = ["chan", "le", "4_red", "3w_1r", "3r_1w", "4_white"]
 
+# Invariant: PERCENT_ROW_ORDER reorders the same six bet types. If this
+# ever fails, one of the two lists has drifted and every round log will
+# quietly miss data for the mismatched bet types.
+assert set(PERCENT_ROW_ORDER) == set(BET_TYPES), (
+    f"PERCENT_ROW_ORDER ({PERCENT_ROW_ORDER}) must contain exactly the "
+    f"same bet types as BET_TYPES ({BET_TYPES})"
+)
+
 # Mapping from area_* class name -> short bet-type name.
 AREA_TO_BET = {f"area_{k}": k for k in BET_TYPES}
 

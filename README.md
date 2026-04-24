@@ -255,11 +255,17 @@ python tools/migrate_labels_15class.py --apply    # rewrite in place
 ```
 
 It drops all `round_id` / `new_round` boxes and shifts the remaining class
-IDs down to fill the gaps. Idempotent: the tool uses the presence of an
-old-only class id (`15` or `16`) as the signal that a file still needs
-migrating. Files already in the 15-class range (all ids in `0..14` with
-no `15`/`16`) are detected and skipped, so re-running the script on an
-already-migrated tree is safe.
+IDs down to fill the gaps.
+
+**Idempotency via sentinel file.** On success the tool writes a sentinel
+file `dataset/labels/.migrated_to_15class` and refuses to run again
+unless you pass `--force`. This is the only reliable guard: the two
+schemas share class IDs `0..14`, so you cannot distinguish an
+already-migrated file from an old-schema file that merely happens not to
+contain `total_bet_cell`/`total_count_cell` boxes. Running on already-
+migrated labels corrupts class IDs, hence the hard stop. The dataset
+shipped in this repo already has the sentinel, so pulling main and
+running `--apply` is a no-op.
 
 ## Troubleshooting
 

@@ -45,10 +45,10 @@ from detector import Detection, XocDiaDetector
 PERCENT_ROW_ORDER: List[str] = [
     "chan",
     "4_red",
-    "3w_1r",
+    "4_white",
     "le",
     "3r_1w",
-    "4_white",
+    "3w_1r"
 ]
 
 # Short bet-type names (index-aligned with the six area_* classes).

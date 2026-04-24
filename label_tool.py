@@ -1,4 +1,5 @@
 import argparse
+import copy
 from pathlib import Path
 
 import cv2
@@ -56,15 +57,33 @@ class LabelTool:
         self.class_input_mode = False
         self.class_input_buffer = ""
 
+        # Index of the currently selected box (None = no selection).
+        self.selected_box = None
+
+        # Template slots (0-9). Each slot is None or a list of box dicts.
+        self.templates = {i: None for i in range(10)}
+        # Template mode: None, "save", or "apply".
+        self.template_mode = None
+
         self.images = self.collect_images()
         if self.only_unlabeled:
             self.images = [p for p in self.images if not self.get_label_path(p).exists()]
+        else:
+            self.current_index = self._find_last_labeled_index()
 
     def collect_images(self):
         images = []
         for ext in IMAGE_EXTS:
             images.extend(self.images_folder.glob(f"*{ext}"))
         return sorted(images)
+
+    def _find_last_labeled_index(self):
+        """Return index of the last image that already has a label file."""
+        last = 0
+        for i, img in enumerate(self.images):
+            if self.get_label_path(img).exists():
+                last = i
+        return last
 
     def get_label_path(self, img_path: Path):
         return self.labels_folder / f"{img_path.stem}.txt"
@@ -102,6 +121,38 @@ class LabelTool:
         self.boxes = self.load_labels(prev_label)
         print(f"Copied {len(self.boxes)} boxes from {prev_label.name}")
 
+    def _find_box_at(self, x, y):
+        """Return index of the smallest box containing (x, y), or None."""
+        if self.current_img is None:
+            return None
+        h, w = self.current_img.shape[:2]
+        best_idx, best_area = None, float("inf")
+        for i, box in enumerate(self.boxes):
+            cx, cy, bw, bh = box["bbox"]
+            x1 = (cx - bw / 2) * w
+            y1 = (cy - bh / 2) * h
+            x2 = (cx + bw / 2) * w
+            y2 = (cy + bh / 2) * h
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                area = bw * bh
+                if area < best_area:
+                    best_idx, best_area = i, area
+        return best_idx
+
+    def _try_select_box(self, x, y):
+        """Toggle selection of the box at (x, y)."""
+        idx = self._find_box_at(x, y)
+        if idx is not None:
+            if self.selected_box == idx:
+                self.selected_box = None
+                print("Deselected box")
+            else:
+                self.selected_box = idx
+                box = self.boxes[idx]
+                print(f"Selected box {idx}: {self.classes[box['class']]}")
+        else:
+            self.selected_box = None
+
     def mouse_callback(self, event, x, y, _flags, _param):
         if self.current_img is None:
             return
@@ -117,7 +168,12 @@ class LabelTool:
         elif event == cv2.EVENT_LBUTTONUP and self.drawing:
             self.drawing = False
             self.temp_point = (x, y)
-            self.add_box_from_points(self.start_point, self.temp_point)
+            dx = abs(self.temp_point[0] - self.start_point[0])
+            dy = abs(self.temp_point[1] - self.start_point[1])
+            if dx < 5 and dy < 5:
+                self._try_select_box(x, y)
+            else:
+                self.add_box_from_points(self.start_point, self.temp_point)
             self.start_point = None
             self.temp_point = None
 
@@ -155,23 +211,32 @@ class LabelTool:
 
     def draw_boxes(self, frame):
         h, w = frame.shape[:2]
-        for box in self.boxes:
+        for i, box in enumerate(self.boxes):
             cx, cy, bw, bh = box["bbox"]
             x1 = int((cx - bw / 2) * w)
             y1 = int((cy - bh / 2) * h)
             x2 = int((cx + bw / 2) * w)
             y2 = int((cy + bh / 2) * h)
             cls_id = box["class"]
+            is_selected = (i == self.selected_box)
             color = self.colors.get(cls_id, (200, 200, 200))
             thickness = 3 if cls_id == self.current_class else 2
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+
+            if is_selected:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), thickness + 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+                label = f"[SEL] {self.classes[cls_id]}"
+            else:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+                label = self.classes[cls_id]
+
             cv2.putText(
                 frame,
-                self.classes[cls_id],
+                label,
                 (x1, max(15, y1 - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                color,
+                (0, 255, 255) if is_selected else color,
                 2,
             )
 
@@ -188,35 +253,59 @@ class LabelTool:
         cv2.putText(frame, title, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         controls_1 = "0-9: class | j/k: prev/next | / + NN + Enter: jump class | t: auto-next"
-        controls_2 = "u: undo | x: clear class | c: copy prev | p: prev img | space: next | s: save | a: autosave | q: quit"
+        controls_2 = "u: undo | x: clear class | c: copy prev | Click: select | d: del sel | Esc: desel"
+        controls_3 = "w+0-9: save tpl | e+0-9: apply tpl | p: prev | space: next | s: save | a: autosave | q: quit"
         cv2.putText(frame, controls_1, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
         cv2.putText(frame, controls_2, (10, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
+        cv2.putText(frame, controls_3, (10, 82), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
+
+        sel_text = ""
+        if self.selected_box is not None and self.selected_box < len(self.boxes):
+            sb = self.boxes[self.selected_box]
+            sel_text = f" | selected=[{self.selected_box}] {self.classes[sb['class']]}"
 
         status = (
             f"autosave={'ON' if self.autosave else 'OFF'} | "
             f"auto-next-class={'ON' if self.auto_next_class else 'OFF'} | "
-            f"boxes={len(self.boxes)}"
+            f"boxes={len(self.boxes)}{sel_text}"
         )
-        cv2.putText(frame, status, (10, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 220, 80), 1)
+        cv2.putText(frame, status, (10, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 220, 80), 1)
 
-        # Class-input mode banner
+        # Mode banners
+        extra_y = 0
         if self.class_input_mode:
             cv2.putText(
                 frame,
                 f"Class input: '{self.class_input_buffer}_' (Enter to apply, Esc to cancel)",
-                (10, 108),
+                (10, 124),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 200, 255),
                 2,
             )
+            extra_y += 22
+
+        if self.template_mode is not None:
+            action = "SAVE to" if self.template_mode == "save" else "APPLY from"
+            used = [str(i) for i in range(10) if self.templates[i] is not None]
+            slots_str = ",".join(used) if used else "none"
+            cv2.putText(
+                frame,
+                f"Template {action} slot 0-9 (used: [{slots_str}]) | Esc to cancel",
+                (10, 124 + extra_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 180),
+                2,
+            )
+            extra_y += 22
 
         # Per-group class counts grid (4 lines).
         class_counts = {k: 0 for k in self.classes}
         for box in self.boxes:
             class_counts[box["class"]] += 1
 
-        y = 130 if self.class_input_mode else 108
+        y = 124 + extra_y
         for group_name, ids in _STATUS_GROUPS:
             parts = [f"{cid}:{self.classes[cid]}({class_counts[cid]})" for cid in ids]
             line = f"{group_name:<6}| " + "  ".join(parts)
@@ -264,8 +353,35 @@ class LabelTool:
             return True
         return True  # consume all other keys silently while typing
 
+    def handle_template_key(self, key):
+        """Handle keys while in template save/apply mode. Returns True if consumed."""
+        if key == 27:  # Esc
+            print("Template mode cancelled.")
+            self.template_mode = None
+            return True
+        if ord("0") <= key <= ord("9"):
+            slot = key - ord("0")
+            if self.template_mode == "save":
+                self.templates[slot] = copy.deepcopy(self.boxes)
+                n = len(self.boxes)
+                print(f"Template saved: slot {slot} ({n} boxes)")
+            elif self.template_mode == "apply":
+                if self.templates[slot] is None:
+                    print(f"Template slot {slot} is empty")
+                else:
+                    self.boxes = copy.deepcopy(self.templates[slot])
+                    self.selected_box = None
+                    print(f"Template applied: slot {slot} ({len(self.boxes)} boxes)")
+            self.template_mode = None
+            return True
+        return True  # consume other keys silently
+
     def handle_key(self, key):
         label_path = self.get_label_path(self.current_img_path)
+
+        if self.template_mode is not None:
+            self.handle_template_key(key)
+            return "stay"
 
         if self.class_input_mode:
             self.handle_class_input_key(key)
@@ -275,6 +391,21 @@ class LabelTool:
             self.class_input_mode = True
             self.class_input_buffer = ""
             print("Class input mode. Type 0-16 then press Enter (Esc to cancel).")
+            return "stay"
+
+        if key == 27:  # Esc
+            if self.selected_box is not None:
+                self.selected_box = None
+                print("Deselected box")
+            return "stay"
+
+        if key == ord("d"):
+            if self.selected_box is not None:
+                removed = self.boxes.pop(self.selected_box)
+                print(f"Deleted box {self.selected_box}: {self.classes[removed['class']]}")
+                self.selected_box = None
+            else:
+                print("No box selected (right-click a box first)")
             return "stay"
 
         if ord("0") <= key <= ord("9"):
@@ -290,6 +421,8 @@ class LabelTool:
             return "stay"
 
         if key == ord("u") and self.boxes:
+            if self.selected_box is not None and self.selected_box >= len(self.boxes) - 1:
+                self.selected_box = None
             self.boxes.pop()
             print("Undo last box")
             return "stay"
@@ -297,11 +430,13 @@ class LabelTool:
         if key == ord("x"):
             before = len(self.boxes)
             self.boxes = [b for b in self.boxes if b["class"] != self.current_class]
+            self.selected_box = None
             print(f"Cleared class {self.current_class}: removed {before - len(self.boxes)} boxes")
             return "stay"
 
         if key == ord("c"):
             self.copy_from_previous()
+            self.selected_box = None
             return "stay"
 
         if key == ord("a"):
@@ -312,6 +447,16 @@ class LabelTool:
         if key == ord("t"):
             self.auto_next_class = not self.auto_next_class
             print(f"Auto-next class -> {'ON' if self.auto_next_class else 'OFF'}")
+            return "stay"
+
+        if key == ord("w"):
+            self.template_mode = "save"
+            print("Template SAVE mode. Press 0-9 to pick slot (Esc to cancel).")
+            return "stay"
+
+        if key == ord("e"):
+            self.template_mode = "apply"
+            print("Template APPLY mode. Press 0-9 to pick slot (Esc to cancel).")
             return "stay"
 
         if key == ord("s"):
@@ -343,6 +488,7 @@ class LabelTool:
             return "next"
 
         self.boxes = self.load_labels(self.get_label_path(img_path))
+        self.selected_box = None
         cv2.namedWindow(self.window_name)
         cv2.setMouseCallback(self.window_name, self.mouse_callback)
 
@@ -366,6 +512,8 @@ class LabelTool:
         print(f"Labels folder: {self.labels_folder}")
         print(f"Total images: {len(self.images)}")
         print(f"Classes: {len(self.classes)}")
+        if self.current_index > 0:
+            print(f"Resuming at image {self.current_index + 1}/{len(self.images)}: {self.images[self.current_index].name}")
 
         while 0 <= self.current_index < len(self.images):
             action = self.run_single_image(self.images[self.current_index])

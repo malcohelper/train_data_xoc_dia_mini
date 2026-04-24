@@ -140,10 +140,15 @@ class RoundTracker:
                 )
             self._start_new_round(state)
 
-        # We're inside an active round -> keep updating bets/percent.
+        # We're inside an active round -> always refresh bets/counts.
+        # Percent is only captured in the round-start window (timer >= 46)
+        # when the scoreboard has just ticked over for the new round and
+        # is visually stable. After that the update_percent call is a
+        # no-op even if more percent_cell detections come in.
         if self.current is not None:
             self.current.update_bets(state)
-            self.current.update_percent(state)
+            if timer is not None and timer >= TIMER_NEW_ROUND_THRESHOLD:
+                self.current.update_percent(state)
 
         # Finalise when a dice result appears.
         if state.dice_result is not None and self.current is not None \
@@ -178,16 +183,18 @@ class RoundTracker:
         return finished
 
     def _save_round(self, rd: Round, frame: np.ndarray) -> None:
-        base = self.rounds_dir / rd.round_id
-        # Collision-safe: if two rounds somehow share the second, append
-        # -1 / -2 / ... so we never overwrite an existing snapshot.
-        if Path(f"{base}.png").exists() or Path(f"{base}.json").exists():
+        # JSON-only: skip PNG to keep the realtime loop light. If you ever
+        # want the frame for debugging, call tools/visualize on a captured
+        # dataset image instead.
+        del frame  # intentionally unused
+        base = self.rounds_dir / f"{rd.round_id}.json"
+        # Collision-safe: if two rounds share the second, append -1/-2/...
+        if base.exists():
             i = 1
-            while Path(f"{base}-{i}.png").exists() or Path(f"{base}-{i}.json").exists():
+            while (self.rounds_dir / f"{rd.round_id}-{i}.json").exists():
                 i += 1
-            base = self.rounds_dir / f"{rd.round_id}-{i}"
-        cv2.imwrite(f"{base}.png", frame)
-        with open(f"{base}.json", "w", encoding="utf-8") as f:
+            base = self.rounds_dir / f"{rd.round_id}-{i}.json"
+        with open(base, "w", encoding="utf-8") as f:
             json.dump(rd.to_dict(), f, indent=2, ensure_ascii=False)
 
     # -- presentation --

@@ -34,7 +34,7 @@ Frame ─► YOLOv8 (15 classes) ─► Group by category
                               RoundTracker (multi-frame state machine)
                                                │
                                                ▼
-                              1 log line + rounds/<ts>.{png,json} per round
+                              1 log line + rounds/<ts>.json per round
 ```
 
 ## Class schema (15 classes)
@@ -64,7 +64,7 @@ ACTIVE  ─► capture scoreboard percent (done once, scoreboard stable)
   │
   │  dice_* detected
   ▼
-LOG 1x  ─► format + print log, save rounds/<ts>.{png,json}
+LOG 1x  ─► format + print log, save rounds/<ts>.json
   │
   ▼
 IDLE (wait for next timer>=46)
@@ -129,7 +129,9 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 ### 1. Collect frames
 
 ```bash
-# Live capture (writes rounds/<ts>.{png,json} once per finished round).
+# Live capture (writes rounds/<ts>.json once per finished round).
+# PNG is NOT saved from the realtime loop anymore (kept it lightweight).
+# Use tools/rounds_to_dataset.py on previously-captured PNGs if you need them.
 python realtime_capture.py
 ```
 

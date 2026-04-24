@@ -1,336 +1,226 @@
-# detector.py - Two-stage detection pipeline
-from ultralytics import YOLO
-from ocr_engine import XocDiaOCR
+"""Single-stage YOLOv8 detector for Xoc Dia UI (17-class schema).
+
+This module is intentionally lean: it only does detection + light post-
+processing (grouping, annotation). OCR and game-state reasoning live in
+``pipeline.py`` so the detector stays reusable in batch / streaming jobs.
+
+Example::
+
+    from detector import XocDiaDetector
+    det = XocDiaDetector(weights="runs/detect/xocdia/weights/best.pt")
+    detections = det.detect(frame)
+    groups = det.group_by_category(detections)
+    annotated = det.annotate(frame, detections)
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List, Optional, Tuple
+
 import cv2
 import numpy as np
-from pathlib import Path
+from ultralytics import YOLO
+
+from classes import CLASSES, COLORS, category_of
+
+
+@dataclass
+class Detection:
+    class_id: int
+    class_name: str
+    conf: float
+    bbox: Tuple[int, int, int, int]  # (x1, y1, x2, y2) in pixels
+    category: str = field(default="")
+
+    def __post_init__(self):
+        if not self.category:
+            self.category = category_of(self.class_id)
+
+    @property
+    def center(self) -> Tuple[int, int]:
+        x1, y1, x2, y2 = self.bbox
+        return (x1 + x2) // 2, (y1 + y2) // 2
+
+    @property
+    def area_px(self) -> int:
+        x1, y1, x2, y2 = self.bbox
+        return max(0, x2 - x1) * max(0, y2 - y1)
+
+    def contains_point(self, x: int, y: int) -> bool:
+        x1, y1, x2, y2 = self.bbox
+        return x1 <= x <= x2 and y1 <= y <= y2
+
+    def iou(self, other: "Detection") -> float:
+        ax1, ay1, ax2, ay2 = self.bbox
+        bx1, by1, bx2, by2 = other.bbox
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+        inter = iw * ih
+        union = self.area_px + other.area_px - inter
+        return inter / union if union > 0 else 0.0
 
 
 class XocDiaDetector:
-    def __init__(self, model_path="best.pt", sub_model_path=None, conf=0.35, sub_conf=0.35, fallback_conf=0.2):
-        # Stage 1 model: detect large regions
-        self.model = YOLO(model_path)
+    """Thin wrapper around ``ultralytics.YOLO`` with typed outputs."""
+
+    def __init__(
+        self,
+        weights: str = "runs/detect/xocdia/weights/best.pt",
+        conf: float = 0.4,
+        iou: float = 0.45,
+        device: Optional[str] = None,
+        imgsz: int = 800,
+    ):
+        self.model = YOLO(weights)
         self.conf = conf
-        self.fallback_conf = fallback_conf
+        self.iou = iou
+        self.device = device
+        self.imgsz = imgsz
 
-        # Stage 2 model: detect sub_count/sub_money inside each area (optional)
-        self.sub_model = None
-        if sub_model_path and Path(sub_model_path).exists():
-            self.sub_model = YOLO(sub_model_path)
-        self.sub_conf = sub_conf
+    # ---------- inference ----------
 
-        # OCR
-        self.ocr = XocDiaOCR()
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        results = self.model(
+            frame,
+            conf=self.conf,
+            iou=self.iou,
+            device=self.device,
+            imgsz=self.imgsz,
+            verbose=False,
+        )[0]
 
-        # Stage 1 classes
-        self.classes = {
-            0: "round_id",
-            1: "timer",
-            2: "area_chan",
-            3: "area_le",
-            4: "area_4_red",
-            5: "area_3w_1r",
-            6: "area_3r_1w",
-            7: "area_4_white",
-            8: "new_round",
-            9: "4r",
-            10: "4w",
-            11: "3w1r",
-            12: "3r1w",
-            13: "2w2r",
-        }
+        detections: List[Detection] = []
+        if results.boxes is None:
+            return detections
 
-        # Stage 2 classes
-        self.sub_classes = {0: "sub_count", 1: "sub_money"}
+        xyxy = results.boxes.xyxy.cpu().numpy().astype(int)
+        cls_ids = results.boxes.cls.cpu().numpy().astype(int)
+        confs = results.boxes.conf.cpu().numpy()
 
-        self.side_area_classes = (
-            "area_chan",
-            "area_le",
-        )
-        self.result_area_classes = (
-            "area_4_red",
-            "area_3w_1r",
-            "area_3r_1w",
-            "area_4_white",
-            "4r",
-            "3w1r",
-            "3r1w",
-            "4w",
-            "2w2r",
-        )
-        self.region_classes = self.side_area_classes + self.result_area_classes
-
-    def detect(self, image_path):
-        """Detect full game state from screenshot path."""
-        image = cv2.imread(image_path)
-        if image is None:
-            raise ValueError(f"Cannot read image: {image_path}")
-        return self.detect_image(image)
-
-    def detect_image(self, image):
-        """Detect full game state directly from numpy image."""
-        detections = self._extract_detections(image, conf=self.conf)
-        result = self.calculate_result(detections)
-        result["detectionPass"] = "primary"
-
-        if self._needs_fallback(result):
-            enhanced = self._enhance_for_detection(image)
-            detections_fb = self._extract_detections(enhanced, conf=self.fallback_conf)
-            result_fb = self.calculate_result(detections_fb)
-            result_fb["detectionPass"] = "fallback"
-
-            if self._score_result(result_fb) >= self._score_result(result):
-                return result_fb
-
-        return result
-
-    def _extract_detections(self, image, conf):
-        results = self.model(image, conf=conf)[0]
-        detections = {
-            "round_id_candidates": [],
-            "timer_candidates": [],
-            "new_round_candidates": [],
-        }
-        for area_name in self.region_classes:
-            detections[area_name] = []
-
-        for box in results.boxes:
-            cls_id = int(box.cls[0])
-            cls_name = self.classes.get(cls_id)
-            if cls_name is None:
-                continue
-
-            bbox = box.xyxy[0].cpu().numpy().astype(int)  # [x1, y1, x2, y2]
-            conf = float(box.conf[0])
-
-            x1, y1, x2, y2 = self._sanitize_bbox(bbox, image.shape)
-            roi = image[y1:y2, x1:x2]
-            if roi.size == 0:
-                continue
-
-            if cls_name == "round_id":
-                detections["round_id_candidates"].append(
-                    {
-                        "bbox": [x1, y1, x2, y2],
-                        "conf": conf,
-                        "text": self.ocr.read_text(roi),
-                    }
+        for (x1, y1, x2, y2), cid, cf in zip(xyxy, cls_ids, confs):
+            detections.append(
+                Detection(
+                    class_id=int(cid),
+                    class_name=CLASSES.get(int(cid), f"cls{cid}"),
+                    conf=float(cf),
+                    bbox=(int(x1), int(y1), int(x2), int(y2)),
                 )
-            elif cls_name == "timer":
-                number = self.ocr.read_number(roi)
-                detections["timer_candidates"].append(
-                    {
-                        "bbox": [x1, y1, x2, y2],
-                        "conf": conf,
-                        "value": int(number) if number else None,
-                    }
-                )
-            elif cls_name == "new_round":
-                detections["new_round_candidates"].append(
-                    {
-                        "bbox": [x1, y1, x2, y2],
-                        "conf": conf,
-                    }
-                )
-            else:
-                area_det = {
-                    "bbox": [x1, y1, x2, y2],
-                    "conf": conf,
-                    "brightness": self.calculate_brightness(roi),
-                    "isActive": self.is_box_active(roi),
-                }
-                if self.sub_model is not None:
-                    area_det.update(self.detect_sub_fields(image, [x1, y1, x2, y2]))
-                detections[cls_name].append(area_det)
-
+            )
         return detections
 
-    def _enhance_for_detection(self, image):
-        """Light enhancement for hard frames (dark/compressed/noisy)."""
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        v = clahe.apply(v)
-        merged = cv2.merge((h, s, v))
-        enhanced = cv2.cvtColor(merged, cv2.COLOR_HSV2BGR)
-        return enhanced
+    def detect_batch(self, frames: Iterable[np.ndarray]) -> List[List[Detection]]:
+        return [self.detect(f) for f in frames]
 
-    def _needs_fallback(self, result):
-        if result.get("detectedArea"):
-            return False
-        if result.get("roundId") and result.get("timer") is not None:
-            return False
-        return True
+    # ---------- helpers ----------
 
-    def _score_result(self, result):
-        score = 0.0
-        if result.get("roundId"):
-            score += 2.0
-        if result.get("timer") is not None:
-            score += 1.5
-        if result.get("detectedArea"):
-            score += 2.0
-        active_regions = 0
-        for area in result.get("betAreas", {}).values():
-            if area.get("bbox") is not None:
-                active_regions += 1
-        score += 0.2 * active_regions
-        return score
-
-    def detect_sub_fields(self, image, area_bbox):
-        """Stage 2 detection inside one area: sub_count and sub_money."""
-        x1, y1, x2, y2 = self._sanitize_bbox(area_bbox, image.shape)
-        area_roi = image[y1:y2, x1:x2]
-        if area_roi.size == 0:
-            return {"sub_count": None, "sub_money": None, "sub_boxes": []}
-
-        sub_result = self.sub_model(area_roi, conf=self.sub_conf)[0]
-        sub_boxes = []
-        best_count = None
-        best_money = None
-
-        for box in sub_result.boxes:
-            sub_cls_id = int(box.cls[0])
-            sub_cls_name = self.sub_classes.get(sub_cls_id)
-            if sub_cls_name is None:
-                continue
-
-            local_bbox = box.xyxy[0].cpu().numpy().astype(int)
-            sx1, sy1, sx2, sy2 = self._sanitize_bbox(local_bbox, area_roi.shape)
-            sub_roi = area_roi[sy1:sy2, sx1:sx2]
-            if sub_roi.size == 0:
-                continue
-
-            conf = float(box.conf[0])
-            global_bbox = [x1 + sx1, y1 + sy1, x1 + sx2, y1 + sy2]
-
-            if sub_cls_name == "sub_count":
-                value = self.ocr.read_number(sub_roi)
-                if value and (best_count is None or conf > best_count["conf"]):
-                    best_count = {"value": int(value), "text": value, "conf": conf}
-            else:
-                text = self.ocr.read_text(sub_roi)
-                if text and (best_money is None or conf > best_money["conf"]):
-                    best_money = {"value": text, "conf": conf}
-
-            sub_boxes.append({"class": sub_cls_name, "bbox": global_bbox, "conf": conf})
-
-        return {
-            "sub_count": best_count["value"] if best_count else None,
-            "sub_money": best_money["value"] if best_money else None,
-            "sub_boxes": sub_boxes,
+    @staticmethod
+    def group_by_category(
+        detections: Iterable[Detection],
+    ) -> Dict[str, List[Detection]]:
+        groups: Dict[str, List[Detection]] = {
+            "state": [], "area": [], "dice": [], "cell": [], "unknown": [],
         }
+        for d in detections:
+            groups.setdefault(d.category, []).append(d)
+        return groups
 
-    def calculate_brightness(self, roi):
-        """Calculate average brightness."""
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        return float(np.mean(gray))
+    @staticmethod
+    def group_by_class(
+        detections: Iterable[Detection],
+    ) -> Dict[str, List[Detection]]:
+        groups: Dict[str, List[Detection]] = {}
+        for d in detections:
+            groups.setdefault(d.class_name, []).append(d)
+        return groups
 
-    def is_box_active(self, roi):
-        """Check if box is active (bright)."""
-        return self.calculate_brightness(roi) > 100
-
-    def _best_detection(self, items):
-        if not items:
-            return None
-        return max(items, key=lambda x: x["conf"])
-
-    def _sanitize_bbox(self, bbox, shape):
-        h, w = shape[:2]
-        x1, y1, x2, y2 = map(int, bbox)
+    @staticmethod
+    def crop(frame: np.ndarray, det: Detection) -> np.ndarray:
+        x1, y1, x2, y2 = det.bbox
+        h, w = frame.shape[:2]
         x1 = max(0, min(x1, w - 1))
+        x2 = max(0, min(x2, w))
         y1 = max(0, min(y1, h - 1))
-        x2 = max(x1 + 1, min(x2, w))
-        y2 = max(y1 + 1, min(y2, h))
-        return x1, y1, x2, y2
+        y2 = max(0, min(y2, h))
+        return frame[y1:y2, x1:x2]
 
-    def calculate_result(self, detections):
-        """Convert raw detections to final output schema."""
-        area_to_dice = {
-            "area_4_red": (4, 0),
-            "area_3r_1w": (3, 1),
-            "area_3w_1r": (1, 3),
-            "area_4_white": (0, 4),
-            "4r": (4, 0),
-            "3r1w": (3, 1),
-            "3w1r": (1, 3),
-            "4w": (0, 4),
-            "2w2r": (2, 2),
-        }
+    # ---------- visualization ----------
 
-        area_scores = {}
-        for area_name in self.result_area_classes:
-            best = self._best_detection(detections[area_name])
-            area_scores[area_name] = best["conf"] if best else 0.0
+    def annotate(
+        self,
+        frame: np.ndarray,
+        detections: Optional[List[Detection]] = None,
+    ) -> np.ndarray:
+        if detections is None:
+            detections = self.detect(frame)
 
-        selected_area = max(area_scores, key=area_scores.get) if area_scores else None
-        red_count, white_count = (0, 0)
-        if selected_area and area_scores[selected_area] > 0:
-            red_count, white_count = area_to_dice[selected_area]
+        out = frame.copy()
+        for d in detections:
+            color = COLORS.get(d.class_id, (200, 200, 200))
+            x1, y1, x2, y2 = d.bbox
+            cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+            label = f"{d.class_name} {d.conf:.2f}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+            y_text = max(th + 4, y1 - 4)
+            cv2.rectangle(
+                out,
+                (x1, y_text - th - 4),
+                (x1 + tw + 4, y_text + 2),
+                color,
+                -1,
+            )
+            cv2.putText(
+                out,
+                label,
+                (x1 + 2, y_text - 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 0),
+                2,
+            )
+        return out
 
-        chan_best = self._best_detection(detections["area_chan"])
-        le_best = self._best_detection(detections["area_le"])
-        chan_active = chan_best["isActive"] if chan_best else False
-        le_active = le_best["isActive"] if le_best else False
-        round_best = self._best_detection(detections["round_id_candidates"])
-        timer_best = self._best_detection(detections["timer_candidates"])
-        new_round_best = self._best_detection(detections["new_round_candidates"])
 
-        area_details = {}
-        for area_name in self.region_classes:
-            best = self._best_detection(detections[area_name])
-            area_details[area_name] = {
-                "bbox": best["bbox"] if best else None,
-                "conf": best["conf"] if best else 0.0,
-                "isActive": best["isActive"] if best else False,
-                "sub_count": best.get("sub_count") if best else None,
-                "sub_money": best.get("sub_money") if best else None,
-                "sub_boxes": best.get("sub_boxes", []) if best else [],
-            }
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="Run XocDia detector on an image.")
+    parser.add_argument("--weights", default="runs/detect/xocdia/weights/best.pt")
+    parser.add_argument("--source", required=True, help="Path to an image file.")
+    parser.add_argument("--conf", type=float, default=0.4)
+    parser.add_argument("--iou", type=float, default=0.45)
+    parser.add_argument("--imgsz", type=int, default=800)
+    parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Path to save annotated image. If omitted, write next to source.",
+    )
+    return parser.parse_args()
 
-        return {
-            "roundId": round_best["text"] if round_best else None,
-            "timer": timer_best["value"] if timer_best else None,
-            "isNewRound": bool(new_round_best),
-            "winner": "CHAN" if chan_active else ("LE" if le_active else None),
-            "diceCount": {
-                "red": red_count,
-                "white": white_count,
-                "total": red_count + white_count,
-            },
-            "result": "LE" if red_count > white_count else ("CHAN" if red_count < white_count else "DRAW"),
-            "detectedArea": selected_area,
-            "regions": {
-                "round_id": {
-                    "bbox": round_best["bbox"] if round_best else None,
-                    "conf": round_best["conf"] if round_best else 0.0,
-                },
-                "timer": {
-                    "bbox": timer_best["bbox"] if timer_best else None,
-                    "conf": timer_best["conf"] if timer_best else 0.0,
-                },
-                "new_round": {
-                    "bbox": new_round_best["bbox"] if new_round_best else None,
-                    "conf": new_round_best["conf"] if new_round_best else 0.0,
-                },
-            },
-            "betAreas": area_details,
-        }
+
+def main():
+    from pathlib import Path
+
+    args = parse_args()
+    frame = cv2.imread(args.source)
+    if frame is None:
+        raise SystemExit(f"Cannot read image: {args.source}")
+
+    det = XocDiaDetector(
+        weights=args.weights,
+        conf=args.conf,
+        iou=args.iou,
+        device=args.device,
+        imgsz=args.imgsz,
+    )
+    detections = det.detect(frame)
+    print(f"{len(detections)} detections:")
+    for d in sorted(detections, key=lambda x: (-x.conf,)):
+        print(f"  [{d.category:>5}] {d.class_name:<20} conf={d.conf:.3f} bbox={d.bbox}")
+
+    out_path = Path(args.output) if args.output else Path(args.source).with_suffix(".annotated.png")
+    cv2.imwrite(str(out_path), det.annotate(frame, detections))
+    print(f"Annotated image saved to: {out_path}")
 
 
 if __name__ == "__main__":
-    detector = XocDiaDetector(
-        model_path="runs/detect/train/weights/best.pt",
-        sub_model_path="runs/detect/sub_train/weights/best.pt",
-    )
-
-    result = detector.detect("screenshot.png")
-
-    print("=" * 50)
-    print(f"Round ID: {result['roundId']}")
-    print(f"Timer: {result['timer']}s")
-    print(f"Winner: {result['winner']}")
-    print(f"Dice: {result['diceCount']['red']} đỏ, {result['diceCount']['white']} trắng")
-    print(f"Result: {result['result']}")
-    print(f"Detected area: {result['detectedArea']}")
-    print("=" * 50)
+    main()

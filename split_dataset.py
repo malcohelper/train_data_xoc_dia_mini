@@ -70,6 +70,8 @@ def collect_pairs(src_images: Path, src_labels: Path):
 
 
 def transfer_file(src: Path, dst: Path, mode: str):
+    if src.resolve() == dst.resolve():
+        return
     if mode == "copy":
         shutil.copy2(src, dst)
     else:

@@ -9,7 +9,10 @@ what the model got wrong.
 Default policy (safe):
 - Only writes a .txt file for an image that doesn't already have one.
   (Use ``--overwrite`` to replace an existing label - DANGEROUS if the
-  file was hand-edited.)
+  file was hand-edited.) Note: if the model produces zero detections
+  for an image, the resulting empty ``.txt`` file is still treated as
+  "already labeled" on subsequent runs - pass ``--overwrite`` to
+  re-process those images after retraining a better model.
 - Per-class confidence thresholds: ``area_*`` (always 6 boxes per frame)
   use a higher threshold than ``dice_*`` (rare) by default.
 - Drops any per-class detections that exceed
@@ -48,7 +51,13 @@ from typing import Dict, List, Tuple
 import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from classes import CLASS_GROUPS, CLASSES, COLORS, EXPECTED_INSTANCES_PER_FRAME
+from classes import (
+    CLASS_GROUPS,
+    CLASSES,
+    COLORS,
+    EXPECTED_INSTANCES_PER_FRAME,
+    category_of,
+)
 
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
@@ -115,7 +124,9 @@ def parse_args():
         "--overwrite",
         action="store_true",
         help="Overwrite existing label files. By default the script skips "
-             "images that already have a label - this is the safe default.",
+             "images that already have a label - this is the safe default. "
+             "NOTE: a 0-byte .txt (no model detections) also counts as "
+             "'already labeled'; use --overwrite to retry those.",
     )
     parser.add_argument(
         "--preview-dir",
@@ -132,15 +143,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def category_of(class_id: int) -> str:
-    for name, ids in CLASS_GROUPS:
-        if class_id in ids:
-            return name
-    return "unknown"
-
-
 def resolve_conf_thresholds(args) -> Dict[str, float]:
     if args.conf is not None:
+        if args.per_category_conf:
+            print(
+                "[WARN] --conf is set; --per-category-conf values are "
+                "ignored. Use only --per-category-conf if you want "
+                "per-category overrides."
+            )
         return {cat: args.conf for cat, _ in CLASS_GROUPS}
     thresholds = dict(DEFAULT_CONF_BY_CATEGORY)
     for tok in args.per_category_conf:

@@ -229,7 +229,10 @@ python tools/semi_auto_label.py --weights .../best.pt \
 
 By default the script **never overwrites** an existing `.txt` (so your
 hand-edited labels are safe). Use `--overwrite` only when you really
-want to redo a folder. After running, open the same images in
+want to redo a folder. **Caveat:** an empty `.txt` (model returned 0
+detections) also counts as "already labeled", so re-running won't
+re-attempt those images - pass `--overwrite` after retraining a better
+model if you want to retry them. After running, open the same images in
 `label_tool.py` and refine the auto-generated boxes - the workflow is
 identical to manual labeling, except you start with boxes drawn instead
 of an empty canvas.

@@ -120,6 +120,8 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
     ├── rounds_to_dataset.py          # copy rounds/*.png into dataset/images/raw/
     ├── migrate_labels_15class.py     # one-shot: 17-class -> 15-class label remap
     ├── visualize.py                  # preview YOLO labels over images
+    ├── cell_preview.py               # highlight a single class / group (label QA)
+    ├── semi_auto_label.py            # pre-label new images with a trained model
     ├── check_labels.py               # label QA / imbalance warnings
     └── eval.py                       # per-class mAP / P / R on the val split
 ```
@@ -172,8 +174,11 @@ QA the labels before spending GPU time on training:
 ```bash
 python tools/check_labels.py                          # dataset/labels/train
 python tools/check_labels.py --split val
-python tools/visualize.py --split train               # interactive
+python tools/visualize.py --split train               # interactive (all classes)
 python tools/visualize.py --split train --save-dir qa # batch export
+python tools/cell_preview.py --classes total_bet_cell # highlight ONE class
+python tools/cell_preview.py --group cell --save-dir qa/cell
+python tools/cell_preview.py --classes dice_4w dice_2w2r --only-with-target
 ```
 
 ### 3. Split into train / val
@@ -201,6 +206,33 @@ python tools/eval.py --weights runs/detect/xocdia/weights/best.pt
 
 Prints overall mAP50 / mAP50-95 / P / R and a per-class table. Confusion
 matrix + PR curves are written to `runs/detect/eval/`.
+
+### 5b. Semi-auto labeling (optional, after first training)
+
+Once you have a working `best.pt` you can pre-label the next batch of
+images with the model and only manually fix what it got wrong, instead
+of drawing every box from scratch:
+
+```bash
+# Fill empty .txt files in dataset/labels/train with model predictions.
+python tools/semi_auto_label.py --weights runs/detect/xocdia/weights/best.pt
+
+# Same, but also write annotated PNG previews to qa_preview/auto for
+# spot-checking before opening the label tool.
+python tools/semi_auto_label.py --weights runs/detect/xocdia/weights/best.pt \
+                                --preview-dir qa_preview/auto
+
+# Per-category confidence overrides (categories: state, area, dice, cell).
+python tools/semi_auto_label.py --weights .../best.pt \
+                                --per-category-conf dice=0.25 area=0.55
+```
+
+By default the script **never overwrites** an existing `.txt` (so your
+hand-edited labels are safe). Use `--overwrite` only when you really
+want to redo a folder. After running, open the same images in
+`label_tool.py` and refine the auto-generated boxes - the workflow is
+identical to manual labeling, except you start with boxes drawn instead
+of an empty canvas.
 
 ### 6. Run
 

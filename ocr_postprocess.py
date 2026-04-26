@@ -130,7 +130,9 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
     if frac:
         out += "." + frac
     if suffix:
-        out += suffix.upper()
+        # ``text`` was uppercased before the regex match, so the suffix
+        # is already canonical - no extra .upper() needed.
+        out += suffix
     return out
 
 
@@ -149,9 +151,17 @@ def sanitise_total_count(raw: Optional[str]) -> Optional[str]:
     # etc.).
     if not _has_digit(text):
         return None
+    # NB: counts apply confusables BEFORE stripping non-digits (the
+    # opposite of sanitise_percent). The asymmetry is deliberate -
+    # counts can be 1-4 digits with no upper sanity bound (the regex
+    # accepts any value 0..9999), so an over-confused result like
+    # "9OL" -> "901" is still bounded by the digit-count regex and
+    # is much more likely to be a true positive recovery than a false
+    # positive. Percents are constrained 0..100, so an over-confused
+    # "58b" -> "586" trips the bound and silently rejects a valid
+    # read - hence percents prefer strip-then-(no-confuse) over
+    # confuse-then-strip.
     text = _apply_confusables(text)
-    # Drop anything that isn't a digit after substitution; OCR sometimes
-    # picks up the trailing ``%`` from the scoreboard or stray dots.
     digits = re.sub(r"\D", "", text)
     if not digits or not _TOTAL_COUNT_RE.match(digits):
         return None
@@ -180,7 +190,14 @@ def sanitise_percent(raw: Optional[str]) -> Optional[str]:
         return None
     # Drop literal ``%`` to make the regex simpler; we re-attach it.
     text = text.replace("%", "")
-    text = _apply_confusables(text)
+    # Strip non-digit chars BEFORE confusable substitution. This stops
+    # trailing noise letters from being merged into the digit run -
+    # e.g. "58b%" -> "58b" -> "58" (correct) instead of "58b" ->
+    # confusables "b->6" -> "586" -> rejected as >100. Trade-off: we
+    # lose the ability to recover "5O" -> "50" via confusables, but
+    # PaddleOCR much more commonly produces "50" or trailing junk
+    # ("58b") than embedded letter-as-digit ("5O") for percent cells.
+    text = re.sub(r"\D", "", text)
     m = _PERCENT_NUM_RE.search(text)
     if not m:
         return None

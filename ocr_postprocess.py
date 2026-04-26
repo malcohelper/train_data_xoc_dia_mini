@@ -78,8 +78,12 @@ def _apply_confusables(text: str, allow_chars: str = "") -> str:
     return "".join(out)
 
 
-# Strip whitespace, strip surrounding quotes/punctuation noise PaddleOCR
-# loves to add (``'``, ``"``, ``,``, ``\``, ``/``).
+# Strip ALL occurrences of whitespace and the noise-y punctuation
+# PaddleOCR likes to inject (``'``, ``"``, ``,``, ``\``, ``/``). The
+# game UI never uses these characters as legitimate separators inside
+# a single cell, so removing them everywhere - not just at the
+# boundaries - is intentional (e.g. ``"7 47M"`` -> ``"747M"``,
+# ``"1,234"`` -> ``"1234"``).
 _STRIP_NOISE = re.compile(r"[\s'\"`,\\/]+")
 
 
@@ -169,6 +173,11 @@ def sanitise_percent(raw: Optional[str]) -> Optional[str]:
     if not raw:
         return None
     text = _denoise(raw)
+    # Same rationale as total_bet / total_count: don't fabricate a
+    # percent out of text that had no digits to begin with
+    # ("LE" -> "13" -> "13%", "SO" -> "50%", "GO" -> "60%", etc.).
+    if not _has_digit(text):
+        return None
     # Drop literal ``%`` to make the regex simpler; we re-attach it.
     text = text.replace("%", "")
     text = _apply_confusables(text)

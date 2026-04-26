@@ -98,7 +98,7 @@ def _has_digit(text: str) -> bool:
 # ---- per-class sanitisers ---------------------------------------------------
 
 
-# Money values: 1-3 digits, optional decimal part, optional K/M suffix.
+# Money values: 1-4 digits, optional decimal part, optional K/M suffix.
 # Matches: ``45``, ``4266``, ``795K``, ``7.47M``, ``13.84M``.
 _TOTAL_BET_RE = re.compile(r"^(\d{1,4})(?:\.(\d{1,3}))?([KkMm])?$")
 

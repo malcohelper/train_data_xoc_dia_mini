@@ -109,6 +109,7 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 ├── train.py                  # train YOLOv8 (game-UI tuned defaults)
 ├── detector.py               # lightweight XocDiaDetector API + CLI
 ├── ocr_engine.py             # PaddleOCR wrapper
+├── ocr_postprocess.py        # per-class OCR sanitisers (regex + confusables)
 ├── pipeline.py               # per-frame GameAnalysisPipeline
 ├── realtime_capture.py       # screen-grab + state machine + rounds/ dump
 ├── split_dataset.py          # 80/20 train/val split
@@ -313,6 +314,15 @@ running `--apply` is a no-op.
 - OCR returns garbage like `WBEL` / `Ell` → bboxes are too loose. Re-label
   the offending frames so the box hugs **only** the digits (no surrounding
   frame / icon / whitespace). See the labeling guide in the PR description.
+- Realtime log still shows letters in numeric fields (e.g. `count=LE`,
+  `total_bet=W92'2`) → run
+  `python realtime_capture.py --weights ... --log-ocr-rejects` to print
+  one `[OCR-REJECT] cls=... raw=...` line per rejected cell. The realtime
+  pipeline applies per-class OCR sanitisers (`ocr_postprocess.py`) that
+  normalise common digit/letter confusables (`B↔8`, `O↔0`, `I↔1`, `S↔5`,
+  `Z↔2`, ...) and reject values that don't match the expected pattern.
+  When a cell is rejected the log shows `-` instead of garbage, and the
+  reject log helps identify which cells need tighter labels.
 - Dice class confused at low data → ensure each dice outcome has at least
   ~20 labeled frames; dice variants are visually distinct so data volume
   dominates.

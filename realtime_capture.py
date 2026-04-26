@@ -226,12 +226,14 @@ class RealtimeCapture:
         conf: float = 0.4,
         imgsz: int = 800,
         device=None,
+        log_ocr_rejects: bool = False,
     ):
         resolved = resolve_weights(weights)
         print(f"Model weights: {resolved}")
 
         self.pipeline = GameAnalysisPipeline(
             weights=resolved, conf=conf, imgsz=imgsz, device=device,
+            log_ocr_rejects=log_ocr_rejects,
         )
         self.detector = self.pipeline.detector  # alias for overlay
         self.sct = mss.mss()
@@ -357,6 +359,13 @@ def _parse_args():
     parser.add_argument("--imgsz", type=int, default=800)
     parser.add_argument("--device", default=None)
     parser.add_argument("--no-preview", action="store_true")
+    parser.add_argument(
+        "--log-ocr-rejects",
+        action="store_true",
+        help="Print one [OCR-REJECT] line per cell whose OCR text "
+             "didn't pass the per-class sanitiser. Useful when tuning "
+             "label tightness or debugging weird log values.",
+    )
     return parser.parse_args()
 
 
@@ -364,5 +373,6 @@ if __name__ == "__main__":
     args = _parse_args()
     cap = RealtimeCapture(
         weights=args.weights, conf=args.conf, imgsz=args.imgsz, device=args.device,
+        log_ocr_rejects=args.log_ocr_rejects,
     )
     cap.start(interval=args.interval, show_preview=not args.no_preview)

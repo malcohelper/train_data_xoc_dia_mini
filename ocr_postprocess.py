@@ -130,7 +130,9 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
     if frac:
         out += "." + frac
     if suffix:
-        out += suffix.upper()
+        # ``text`` was uppercased before the regex match, so the suffix
+        # is already canonical - no extra .upper() needed.
+        out += suffix
     return out
 
 
@@ -180,7 +182,14 @@ def sanitise_percent(raw: Optional[str]) -> Optional[str]:
         return None
     # Drop literal ``%`` to make the regex simpler; we re-attach it.
     text = text.replace("%", "")
-    text = _apply_confusables(text)
+    # Strip non-digit chars BEFORE confusable substitution. This stops
+    # trailing noise letters from being merged into the digit run -
+    # e.g. "58b%" -> "58b" -> "58" (correct) instead of "58b" ->
+    # confusables "b->6" -> "586" -> rejected as >100. Trade-off: we
+    # lose the ability to recover "5O" -> "50" via confusables, but
+    # PaddleOCR much more commonly produces "50" or trailing junk
+    # ("58b") than embedded letter-as-digit ("5O") for percent cells.
+    text = re.sub(r"\D", "", text)
     m = _PERCENT_NUM_RE.search(text)
     if not m:
         return None

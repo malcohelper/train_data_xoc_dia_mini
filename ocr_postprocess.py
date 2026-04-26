@@ -151,9 +151,17 @@ def sanitise_total_count(raw: Optional[str]) -> Optional[str]:
     # etc.).
     if not _has_digit(text):
         return None
+    # NB: counts apply confusables BEFORE stripping non-digits (the
+    # opposite of sanitise_percent). The asymmetry is deliberate -
+    # counts can be 1-4 digits with no upper sanity bound (the regex
+    # accepts any value 0..9999), so an over-confused result like
+    # "9OL" -> "901" is still bounded by the digit-count regex and
+    # is much more likely to be a true positive recovery than a false
+    # positive. Percents are constrained 0..100, so an over-confused
+    # "58b" -> "586" trips the bound and silently rejects a valid
+    # read - hence percents prefer strip-then-(no-confuse) over
+    # confuse-then-strip.
     text = _apply_confusables(text)
-    # Drop anything that isn't a digit after substitution; OCR sometimes
-    # picks up the trailing ``%`` from the scoreboard or stray dots.
     digits = re.sub(r"\D", "", text)
     if not digits or not _TOTAL_COUNT_RE.match(digits):
         return None

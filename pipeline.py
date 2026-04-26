@@ -38,6 +38,7 @@ import numpy as np
 
 from classes import CLASS_NAME_TO_ID
 from detector import Detection, XocDiaDetector
+from ocr_postprocess import sanitise as sanitise_ocr
 
 # Row order of the 6 percent_cell detections in the scoreboard, top to
 # bottom. Keys are the short bet-type names used throughout the pipeline.
@@ -128,12 +129,14 @@ class GameAnalysisPipeline:
         device: Optional[str] = None,
         ocr: Optional["object"] = None,  # injected OCR engine for tests
         percent_row_order: Optional[List[str]] = None,
+        log_ocr_rejects: bool = False,
     ):
         self.detector = XocDiaDetector(
             weights=weights, conf=conf, iou=iou, imgsz=imgsz, device=device,
         )
         self.percent_row_order = percent_row_order or PERCENT_ROW_ORDER
         self._ocr = ocr
+        self.log_ocr_rejects = log_ocr_rejects
 
     # -------- OCR lazy init --------
     @property
@@ -236,9 +239,10 @@ class GameAnalysisPipeline:
                 bet_type = self._assign_cell_to_area(cell, areas)
                 if bet_type is None:
                     continue
-                text = self.ocr.read_text(self.detector.crop(frame, cell))
+                raw = self.ocr.read_text(self.detector.crop(frame, cell))
+                cleaned = self._sanitise(cell_class, raw)
                 bet = state.bets.setdefault(bet_type, BetState(bet_type=bet_type))
-                setattr(bet, slot, text)
+                setattr(bet, slot, cleaned)
 
         # percent_cell: scoreboard rows, sort by y-coord and map by order.
         percent_cells = sorted(
@@ -248,9 +252,16 @@ class GameAnalysisPipeline:
             if row_idx >= len(self.percent_row_order):
                 break
             bet_type = self.percent_row_order[row_idx]
-            text = self.ocr.read_text(self.detector.crop(frame, cell))
+            raw = self.ocr.read_text(self.detector.crop(frame, cell))
+            cleaned = self._sanitise("percent_cell", raw)
             bet = state.bets.setdefault(bet_type, BetState(bet_type=bet_type))
-            bet.percent = text
+            bet.percent = cleaned
+
+    def _sanitise(self, cell_class: str, raw: Optional[str]) -> Optional[str]:
+        cleaned = sanitise_ocr(cell_class, raw)
+        if self.log_ocr_rejects and raw and not cleaned:
+            print(f"[OCR-REJECT] cls={cell_class} raw={raw!r}")
+        return cleaned
 
     @staticmethod
     def _assign_cell_to_area(

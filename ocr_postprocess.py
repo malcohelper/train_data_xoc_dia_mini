@@ -130,6 +130,15 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
     if not m:
         return None
     intp, frac, suffix = m.groups()
+    # The regex was widened to ``\d{1,5}`` only to make the
+    # ``K=14`` recovery branch below reachable. A 5-digit integer
+    # part is not a value the game UI can show (anything >= 1000
+    # always renders as a fractional like ``12.34M``, never as
+    # ``12345`` / ``12345K`` / ``12345.6``), so reject it up front
+    # unless it's a candidate for K=14 recovery (5 digits ending
+    # in ``14`` with no suffix).
+    if len(intp) == 5 and not (suffix is None and frac is None and intp.endswith("14")):
+        return None
     out = intp
     if frac:
         out += "." + frac
@@ -153,15 +162,6 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
             out = out[:-2] + "K"
         elif frac is None and len(out) == 4 and out.endswith("4"):
             out = out[:-1] + "K"
-        elif len(intp) == 5:
-            # The regex was widened to ``\d{1,5}`` only to make the
-            # K=14 recovery branch reachable. A 5-digit integer part
-            # that does NOT end in ``14`` (and has no K/M suffix) is
-            # not a value the game UI can show - anything >= 1000
-            # always renders with a K/M suffix or as a fractional
-            # like ``12.34M``. Reject it as garbage. Covers both
-            # ``12345`` (no frac) and ``12345.6`` (with frac).
-            return None
     return out
 
 

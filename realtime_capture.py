@@ -261,13 +261,17 @@ class RealtimeCapture:
         imgsz: int = 800,
         device=None,
         log_ocr_rejects: bool = False,
+        debug_cells_dir: Optional[str] = None,
     ):
         resolved = resolve_weights(weights)
         print(f"Model weights: {resolved}")
+        if debug_cells_dir:
+            print(f"Debug cell crops -> {debug_cells_dir}/")
 
         self.pipeline = GameAnalysisPipeline(
             weights=resolved, conf=conf, imgsz=imgsz, device=device,
             log_ocr_rejects=log_ocr_rejects,
+            debug_cells_dir=debug_cells_dir,
         )
         self.detector = self.pipeline.detector  # alias for overlay
         self.sct = mss.mss()
@@ -400,6 +404,18 @@ def _parse_args():
              "didn't pass the per-class sanitiser. Useful when tuning "
              "label tightness or debugging weird log values.",
     )
+    parser.add_argument(
+        "--debug-save-cells",
+        nargs="?",
+        const="debug_cells",
+        default=None,
+        metavar="DIR",
+        help="Dump every cell crop fed to the OCR (raw + preprocessed "
+             "PNG) plus the OCR/sanitised text into DIR (default: "
+             "'debug_cells'). Use this to collect real bbox crops for "
+             "tuning preprocessing offline. Off by default - has I/O "
+             "overhead, only enable for debug runs.",
+    )
     return parser.parse_args()
 
 
@@ -408,5 +424,6 @@ if __name__ == "__main__":
     cap = RealtimeCapture(
         weights=args.weights, conf=args.conf, imgsz=args.imgsz, device=args.device,
         log_ocr_rejects=args.log_ocr_rejects,
+        debug_cells_dir=args.debug_save_cells,
     )
     cap.start(interval=args.interval, show_preview=not args.no_preview)

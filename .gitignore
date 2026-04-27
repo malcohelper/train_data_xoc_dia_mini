@@ -22,3 +22,7 @@ mlruns/
 
 # Temporary captures / debug images at repo root
 temp_capture.png
+
+# Realtime capture outputs
+rounds/
+debug_cells/

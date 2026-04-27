@@ -337,6 +337,19 @@ running `--apply` is a no-op.
   window and resolves them via majority vote at round finalisation
   (`Round.finalise_percent`). A single bad frame in a 2-3 frame window is
   voted out automatically.
+- Need to tune `cell_preprocessor.py` for a specific cell class? Pass
+  `--debug-save-cells [DIR]` (default `debug_cells/`) to
+  `realtime_capture.py`. Every cell crop fed to the OCR is then dumped
+  to disk both before and after preprocessing, alongside a `.txt` with
+  the OCR + sanitised result:
+  ```
+  debug_cells/
+    f00001_chan_total_bet_cell_raw.png      # what YOLO cropped
+    f00001_chan_total_bet_cell_prep.png     # what PaddleOCR sees
+    f00001_chan_total_bet_cell.txt          # raw_ocr=... / sanitised=...
+    ...
+  ```
+  Disable in production - the I/O is non-trivial.
 - Dice class confused at low data → ensure each dice outcome has at least
   ~20 labeled frames; dice variants are visually distinct so data volume
   dominates.

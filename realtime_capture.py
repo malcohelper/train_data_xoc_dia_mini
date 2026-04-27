@@ -321,7 +321,20 @@ class RealtimeCapture:
             print("Region selection cancelled.")
 
     # ---------- main loop ----------
-    def start(self, interval: float = 1.0, show_preview: bool = True) -> None:
+    def start(
+        self,
+        interval: float = 1.0,
+        show_preview: bool = True,
+        auto_roi: bool = True,
+    ) -> None:
+        if auto_roi and show_preview:
+            # Pop the ROI selector immediately on start so the user
+            # can drag-select the game window before detection begins.
+            # The default ``self.monitor`` (1280x800@(0,0)) almost
+            # never matches the user's actual game window, so without
+            # this prompt detection silently produces ``dets=0`` until
+            # the user remembers to press ``r``.
+            self.select_region_with_mouse()
         print("Starting real-time detection. Hotkeys: r / s / q")
         last_detect = 0.0
         preview_period = 1.0 / self.preview_fps
@@ -438,6 +451,16 @@ def _parse_args():
     parser.add_argument("--device", default=None)
     parser.add_argument("--no-preview", action="store_true")
     parser.add_argument(
+        "--no-auto-roi",
+        action="store_true",
+        help="Skip the ROI prompt at startup and use the default "
+             "capture region (1280x800 at top-left of the primary "
+             "display). You can still press 'r' inside the preview "
+             "window to select a region later. The ROI prompt is "
+             "preview-only and is also implicitly skipped when "
+             "--no-preview is set (no GUI to host the selector).",
+    )
+    parser.add_argument(
         "--log-ocr-rejects",
         action="store_true",
         help="Print one [OCR-REJECT] line per cell whose OCR text "
@@ -484,4 +507,8 @@ if __name__ == "__main__":
         preview_fps=args.preview_fps,
         diag=args.diag,
     )
-    cap.start(interval=args.interval, show_preview=not args.no_preview)
+    cap.start(
+        interval=args.interval,
+        show_preview=not args.no_preview,
+        auto_roi=not args.no_auto_roi,
+    )

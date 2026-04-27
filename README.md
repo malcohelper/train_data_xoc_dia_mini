@@ -110,6 +110,9 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 ├── detector.py               # lightweight XocDiaDetector API + CLI
 ├── ocr_engine.py             # PaddleOCR wrapper
 ├── ocr_postprocess.py        # per-class OCR sanitisers (regex + confusables)
+├── cell_preprocessor.py      # per-class image preprocessing before OCR
+                              #   (HSV mask, upscale, binarise) - big win on
+                              #   stylised game-UI text vs raw crops
 ├── pipeline.py               # per-frame GameAnalysisPipeline
 ├── realtime_capture.py       # screen-grab + state machine + rounds/ dump
 ├── split_dataset.py          # 80/20 train/val split
@@ -318,11 +321,22 @@ running `--apply` is a no-op.
   `total_bet=W92'2`) → run
   `python realtime_capture.py --weights ... --log-ocr-rejects` to print
   one `[OCR-REJECT] cls=... raw=...` line per rejected cell. The realtime
-  pipeline applies per-class OCR sanitisers (`ocr_postprocess.py`) that
-  normalise common digit/letter confusables (`B↔8`, `O↔0`, `I↔1`, `S↔5`,
-  `Z↔2`, ...) and reject values that don't match the expected pattern.
+  pipeline runs two complementary OCR-quality layers:
+    1. **`cell_preprocessor.py`** — image-side: HSV mask the foreground
+       (yellow money / white counts), Otsu binarise, bicubic upscale to
+       ~64-80px, white-pad. Turns stylised game-UI text into clean
+       black-on-white that PaddleOCR's CRNN handles well.
+    2. **`ocr_postprocess.py`** — text-side: per-class regex + confusable
+       normalisation (`B↔8`, `O↔0`, `I↔1`, `S↔5`, `Z↔2`, ...). Rejects
+       values that don't match the expected pattern.
   When a cell is rejected the log shows `-` instead of garbage, and the
   reject log helps identify which cells need tighter labels.
+- Percent in the `[46,48]` window flickers between values (e.g. `47%` on
+  one frame, `7%` on the next due to OCR noise) → no action needed. The
+  realtime tracker accumulates *all* sanitised percent reads inside the
+  window and resolves them via majority vote at round finalisation
+  (`Round.finalise_percent`). A single bad frame in a 2-3 frame window is
+  voted out automatically.
 - Dice class confused at low data → ensure each dice outcome has at least
   ~20 labeled frames; dice variants are visually distinct so data volume
   dominates.

@@ -34,6 +34,7 @@ Example::
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 from cell_preprocessor import preprocess as preprocess_cell
@@ -131,6 +132,7 @@ class GameAnalysisPipeline:
         ocr: Optional["object"] = None,  # injected OCR engine for tests
         percent_row_order: Optional[List[str]] = None,
         log_ocr_rejects: bool = False,
+        debug_cells_dir: Optional[str] = None,
     ):
         self.detector = XocDiaDetector(
             weights=weights, conf=conf, iou=iou, imgsz=imgsz, device=device,
@@ -138,6 +140,15 @@ class GameAnalysisPipeline:
         self.percent_row_order = percent_row_order or PERCENT_ROW_ORDER
         self._ocr = ocr
         self.log_ocr_rejects = log_ocr_rejects
+        # When set, every cell crop fed to the OCR is dumped to disk as
+        # ``<dir>/<frame_id>_<bet_type>_<cell_class>_{raw,prep}.png``.
+        # The OCR text is also written next to it as a ``.txt`` so we
+        # can audit recogniser failures without rerunning the model.
+        self.debug_cells_dir = debug_cells_dir
+        self._debug_frame_counter = 0
+        if self.debug_cells_dir:
+            from pathlib import Path as _P
+            _P(self.debug_cells_dir).mkdir(parents=True, exist_ok=True)
 
     # -------- OCR lazy init --------
     @property
@@ -231,6 +242,10 @@ class GameAnalysisPipeline:
         for d in cells:
             by_class.setdefault(d.class_name, []).append(d)
 
+        if self.debug_cells_dir:
+            self._debug_frame_counter += 1
+        frame_id = self._debug_frame_counter
+
         # total_bet_cell and total_count_cell: assign via area containment.
         for cell_class, slot in (
             ("total_bet_cell", "total_bet"),
@@ -240,9 +255,14 @@ class GameAnalysisPipeline:
                 bet_type = self._assign_cell_to_area(cell, areas)
                 if bet_type is None:
                     continue
-                crop = preprocess_cell(cell_class, self.detector.crop(frame, cell))
-                raw = self.ocr.read_text(crop)
-                cleaned = self._sanitise(cell_class, raw)
+                raw_crop = self.detector.crop(frame, cell)
+                prep_crop = preprocess_cell(cell_class, raw_crop)
+                ocr_text = self.ocr.read_text(prep_crop)
+                cleaned = self._sanitise(cell_class, ocr_text)
+                self._dump_debug_cell(
+                    frame_id, bet_type, cell_class, raw_crop, prep_crop,
+                    ocr_text, cleaned,
+                )
                 bet = state.bets.setdefault(bet_type, BetState(bet_type=bet_type))
                 setattr(bet, slot, cleaned)
 
@@ -254,9 +274,14 @@ class GameAnalysisPipeline:
             if row_idx >= len(self.percent_row_order):
                 break
             bet_type = self.percent_row_order[row_idx]
-            crop = preprocess_cell("percent_cell", self.detector.crop(frame, cell))
-            raw = self.ocr.read_text(crop)
-            cleaned = self._sanitise("percent_cell", raw)
+            raw_crop = self.detector.crop(frame, cell)
+            prep_crop = preprocess_cell("percent_cell", raw_crop)
+            ocr_text = self.ocr.read_text(prep_crop)
+            cleaned = self._sanitise("percent_cell", ocr_text)
+            self._dump_debug_cell(
+                frame_id, bet_type, "percent_cell", raw_crop, prep_crop,
+                ocr_text, cleaned,
+            )
             bet = state.bets.setdefault(bet_type, BetState(bet_type=bet_type))
             bet.percent = cleaned
 
@@ -265,6 +290,37 @@ class GameAnalysisPipeline:
         if self.log_ocr_rejects and raw and not cleaned:
             print(f"[OCR-REJECT] cls={cell_class} raw={raw!r}")
         return cleaned
+
+    def _dump_debug_cell(
+        self,
+        frame_id: int,
+        bet_type: str,
+        cell_class: str,
+        raw_crop: np.ndarray,
+        prep_crop: np.ndarray,
+        ocr_text: Optional[str],
+        sanitised: Optional[str],
+    ) -> None:
+        """Persist raw + preprocessed cell crops and the OCR result for
+        offline preprocessing-tuning. No-op unless ``debug_cells_dir``
+        was set."""
+        if not self.debug_cells_dir:
+            return
+        base = (
+            f"{self.debug_cells_dir}/f{frame_id:05d}_"
+            f"{bet_type}_{cell_class}"
+        )
+        try:
+            if raw_crop is not None and getattr(raw_crop, "size", 0) > 0:
+                cv2.imwrite(base + "_raw.png", raw_crop)
+            if prep_crop is not None and getattr(prep_crop, "size", 0) > 0:
+                cv2.imwrite(base + "_prep.png", prep_crop)
+            with open(base + ".txt", "w", encoding="utf-8") as f:
+                f.write(
+                    f"raw_ocr={ocr_text!r}\nsanitised={sanitised!r}\n"
+                )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[debug-cells] failed to write {base}: {exc}")
 
     @staticmethod
     def _assign_cell_to_area(

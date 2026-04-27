@@ -133,6 +133,18 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
         # ``text`` was uppercased before the regex match, so the suffix
         # is already canonical - no extra .upper() needed.
         out += suffix
+    else:
+        # PaddleOCR confusable: the trailing ``K`` of a money value
+        # like ``767K`` is sometimes recognised as ``4``, leaving a
+        # plain 4-digit number that survives the regex (e.g. ``7674``).
+        # The game UI always shows a ``K``/``M`` suffix for values
+        # >= 1000, so a 4-digit plain integer ending in ``4`` is much
+        # more likely a misread ``XXXK`` than a legitimate 4-digit bet.
+        # Recover it. This may false-positive on legitimate values like
+        # ``1234`` (rare in this game), so we accept the small risk in
+        # exchange for fixing the much more common K-misread.
+        if frac is None and len(out) == 4 and out.endswith("4"):
+            out = out[:-1] + "K"
     return out
 
 

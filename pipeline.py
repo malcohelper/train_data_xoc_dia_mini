@@ -376,7 +376,6 @@ def _parse_args():
 
 def _main():
     import json
-    import cv2
 
     args = _parse_args()
     frame = cv2.imread(args.source)

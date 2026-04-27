@@ -299,24 +299,32 @@ class RealtimeCapture:
         # follows the user's window across moves / resizes.
         self.window_tracker: Optional[WindowTracker] = None
         if window_title or window_owner:
-            self.window_tracker = WindowTracker(
-                title_substring=window_title,
-                owner_substring=window_owner,
-            )
-            match = self.window_tracker.initial_resolve()
-            if match is None:
+            from window_capture import is_macos
+            if not is_macos():
                 print(
-                    f"[window-capture] No window matched title="
-                    f"{window_title!r} owner={window_owner!r}; falling "
-                    f"back to manual ROI selection."
+                    "[window-capture] --window-title/--window-owner are "
+                    "macOS-only; ignoring and falling back to manual "
+                    "ROI selection."
                 )
-                self.window_tracker = None
             else:
-                self.monitor = dict(match.monitor)
-                print(
-                    f"[window-capture] Tracking window "
-                    f"{match.owner!r} - {match.title!r} at {self.monitor}"
+                self.window_tracker = WindowTracker(
+                    title_substring=window_title,
+                    owner_substring=window_owner,
                 )
+                match = self.window_tracker.initial_resolve()
+                if match is None:
+                    print(
+                        f"[window-capture] No window matched title="
+                        f"{window_title!r} owner={window_owner!r}; "
+                        f"falling back to manual ROI selection."
+                    )
+                    self.window_tracker = None
+                else:
+                    self.monitor = dict(match.monitor)
+                    print(
+                        f"[window-capture] Tracking window "
+                        f"{match.owner!r} - {match.title!r} at {self.monitor}"
+                    )
 
     # ---------- capture ----------
     def capture(self) -> np.ndarray:

@@ -41,6 +41,7 @@ import numpy as np
 
 from detector import XocDiaDetector  # noqa: F401 - kept for external callers
 from pipeline import BET_TYPES, GameAnalysisPipeline, GameState, PERCENT_ROW_ORDER
+from window_capture import WindowTracker
 
 
 # Timer threshold that marks the start of a new round. The game resets the
@@ -262,6 +263,9 @@ class RealtimeCapture:
         device=None,
         log_ocr_rejects: bool = False,
         debug_cells_dir: Optional[str] = None,
+        window_title: Optional[str] = None,
+        window_owner: Optional[str] = None,
+        preview_fps: float = 10.0,
     ):
         resolved = resolve_weights(weights)
         print(f"Model weights: {resolved}")
@@ -282,6 +286,45 @@ class RealtimeCapture:
         self.last_state: Optional[GameState] = None
         self.last_frame: Optional[np.ndarray] = None
         self.running = True
+
+        # Cap preview redraw rate. Detection still runs on its own
+        # ``--interval`` schedule (default 1s); the preview only needs
+        # to look smooth, not to drive detection. 10 FPS by default
+        # cuts CPU drastically vs. the previous ~30 FPS busy loop.
+        self.preview_fps = max(1.0, preview_fps)
+        self._last_preview_render = 0.0
+
+        # Optional macOS window tracker. When set we re-resolve the
+        # window bounds every couple of seconds so the capture box
+        # follows the user's window across moves / resizes.
+        self.window_tracker: Optional[WindowTracker] = None
+        if window_title or window_owner:
+            from window_capture import is_macos
+            if not is_macos():
+                print(
+                    "[window-capture] --window-title/--window-owner are "
+                    "macOS-only; ignoring and falling back to manual "
+                    "ROI selection."
+                )
+            else:
+                self.window_tracker = WindowTracker(
+                    title_substring=window_title,
+                    owner_substring=window_owner,
+                )
+                match = self.window_tracker.initial_resolve()
+                if match is None:
+                    print(
+                        f"[window-capture] No window matched title="
+                        f"{window_title!r} owner={window_owner!r}; "
+                        f"falling back to manual ROI selection."
+                    )
+                    self.window_tracker = None
+                else:
+                    self.monitor = dict(match.monitor)
+                    print(
+                        f"[window-capture] Tracking window "
+                        f"{match.owner!r} - {match.title!r} at {self.monitor}"
+                    )
 
     # ---------- capture ----------
     def capture(self) -> np.ndarray:
@@ -314,13 +357,33 @@ class RealtimeCapture:
     def start(self, interval: float = 1.0, show_preview: bool = True) -> None:
         print("Starting real-time detection. Hotkeys: r / s / q")
         last_detect = 0.0
+        preview_period = 1.0 / self.preview_fps
+        # Sleep granularity. Has to be small enough that hotkeys feel
+        # responsive but large enough to keep idle CPU low.
+        idle_sleep = min(0.05, preview_period / 2.0)
         while self.running:
             try:
+                now = time.time()
+                detect_due = (now - last_detect) >= interval
+                preview_due = show_preview and (
+                    now - self._last_preview_render >= preview_period
+                )
+                if not (detect_due or preview_due):
+                    time.sleep(idle_sleep)
+                    continue
+
+                # Refresh the capture region from the window tracker
+                # before grabbing the frame. Cheap most of the time
+                # (Quartz lookup is throttled by ``poll_interval``).
+                if self.window_tracker is not None:
+                    mon = self.window_tracker.current_monitor()
+                    if mon is not None:
+                        self.monitor = dict(mon)
+
                 frame = self.capture()
                 self.last_frame = frame
-                now = time.time()
 
-                if now - last_detect >= interval:
+                if detect_due:
                     state = self.pipeline.analyze(frame)
                     self.last_state = state
                     last_detect = now
@@ -328,12 +391,11 @@ class RealtimeCapture:
                     if finished is not None:
                         print(self.tracker.format_log(finished))
 
-                if show_preview:
+                if preview_due:
                     self._render_preview(frame)
+                    self._last_preview_render = now
                     key = cv2.waitKey(1) & 0xFF
                     self._handle_hotkeys(key, frame)
-
-                time.sleep(0.03)
             except KeyboardInterrupt:
                 print("Stopped.")
                 break
@@ -382,6 +444,17 @@ class RealtimeCapture:
         if key == ord("q"):
             self.running = False
         elif key == ord("r"):
+            # The window tracker re-resolves the monitor every poll
+            # interval (~2s) and would silently overwrite the user's
+            # manual selection. Drop the tracker the moment the user
+            # asks for a manual region - they've explicitly chosen to
+            # override window tracking.
+            if self.window_tracker is not None:
+                print(
+                    "[window-capture] Manual region selected; disabling "
+                    "window tracker for this session."
+                )
+                self.window_tracker = None
             self.select_region_with_mouse()
         elif key == ord("s"):
             cv2.imwrite("preview_capture.png", frame)
@@ -416,14 +489,69 @@ def _parse_args():
              "tuning preprocessing offline. Off by default - has I/O "
              "overhead, only enable for debug runs.",
     )
+    parser.add_argument(
+        "--window-title",
+        default=None,
+        metavar="SUBSTRING",
+        help="macOS only: track an on-screen window whose title "
+             "contains SUBSTRING (case-insensitive). The capture box "
+             "follows the window across moves and resizes. Falls back "
+             "to manual ROI selection if no window matches.",
+    )
+    parser.add_argument(
+        "--window-owner",
+        default=None,
+        metavar="SUBSTRING",
+        help="macOS only: combine with (or use instead of) "
+             "--window-title to filter by the owning app's name "
+             "(e.g. 'Safari', 'Chrome'). Useful when multiple apps "
+             "have similar window titles.",
+    )
+    parser.add_argument(
+        "--list-windows",
+        action="store_true",
+        help="macOS only: print the list of on-screen windows "
+             "(owner + title) and exit. Use this to discover the "
+             "right --window-title / --window-owner values.",
+    )
+    parser.add_argument(
+        "--preview-fps",
+        type=float,
+        default=10.0,
+        help="Cap preview redraw rate (default: 10 FPS). Lower values "
+             "reduce CPU on slow machines. Detection still runs on its "
+             "own --interval schedule independently.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
+    if args.list_windows:
+        from window_capture import is_macos, list_windows
+        if not is_macos():
+            print("--list-windows is only supported on macOS.")
+            raise SystemExit(1)
+        for w in list_windows():
+            owner = w.get("kCGWindowOwnerName", "")
+            title = w.get("kCGWindowName", "") or ""
+            bounds = w.get("kCGWindowBounds") or {}
+            try:
+                rect = (
+                    f"{int(bounds['Width'])}x{int(bounds['Height'])} "
+                    f"@ ({int(bounds['X'])},{int(bounds['Y'])})"
+                )
+            except (KeyError, TypeError, ValueError):
+                rect = "?"
+            print(f"  [{owner}] {title!r}  {rect}")
+        raise SystemExit(0)
+
     cap = RealtimeCapture(
         weights=args.weights, conf=args.conf, imgsz=args.imgsz, device=args.device,
         log_ocr_rejects=args.log_ocr_rejects,
         debug_cells_dir=args.debug_save_cells,
+        window_title=args.window_title,
+        window_owner=args.window_owner,
+        preview_fps=args.preview_fps,
     )
     cap.start(interval=args.interval, show_preview=not args.no_preview)

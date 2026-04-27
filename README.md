@@ -251,9 +251,22 @@ python pipeline.py --weights runs/detect/xocdia/weights/best.pt \
 # Detector only (no OCR / no state inference)
 python detector.py --weights runs/detect/xocdia/weights/best.pt --source frame.png
 
-# Real-time screen capture + analyze
+# Real-time screen capture + analyze (full-screen ROI flow, default)
 python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
+
+# macOS only: track a specific app window (capture box follows it
+# across moves / resizes; no need to redo ROI on every restart).
+python realtime_capture.py --list-windows                  # discover titles
+python realtime_capture.py --window-title "Xoc Dia"        # by title
+python realtime_capture.py --window-owner Chrome \
+                          --window-title "Casino"          # narrow by app
 ```
+
+`--window-title` / `--window-owner` need `pyobjc-framework-Quartz`
+(`pip install pyobjc-framework-Quartz`). On non-macOS hosts the flags
+print a warning and fall back to the manual ROI flow. Tune CPU usage
+on slow machines via `--preview-fps` (default 10; detection runs on
+its own `--interval`).
 
 ## Dataset sizing
 

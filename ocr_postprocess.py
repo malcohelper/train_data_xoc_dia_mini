@@ -153,6 +153,13 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
             out = out[:-2] + "K"
         elif frac is None and len(out) == 4 and out.endswith("4"):
             out = out[:-1] + "K"
+        elif frac is None and len(out) == 5:
+            # The regex was widened to ``\d{1,5}`` only to make the
+            # K=14 recovery branch reachable. A 5-digit plain integer
+            # that does NOT end in ``14`` is not a value the game UI
+            # can show (anything >= 1000 always has a K/M suffix), so
+            # treat it as garbage rather than letting it through.
+            return None
     return out
 
 

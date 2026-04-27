@@ -251,9 +251,12 @@ python pipeline.py --weights runs/detect/xocdia/weights/best.pt \
 # Detector only (no OCR / no state inference)
 python detector.py --weights runs/detect/xocdia/weights/best.pt --source frame.png
 
-# Real-time screen capture + analyze (full-screen ROI flow)
+# Real-time screen capture + analyze (drag-select ROI on start)
 python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
-# Press `r` in the preview to drag-select the game region, `q` to quit.
+# A "Select Game Region" window pops immediately - drag the box around
+# just the game UI, then press ENTER/SPACE. Press `r` later in the
+# preview to re-select, `q` to quit. Pass `--no-auto-roi` to skip
+# the prompt and start with the default region (1280x800@(0,0)).
 ```
 
 Tune CPU usage on slow machines via `--preview-fps` (default 10;

@@ -115,17 +115,31 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
     """
     if not raw:
         return None
-    text = _denoise(raw)
-    # Reject text that has no original digits at all - prevents pure
-    # letter junk like "Gi" / "WAIL" from being mapped to a fake
-    # numeric value via confusables.
-    if not _has_digit(text):
+    # Decimal-comma recovery: the game UI uses ``.`` for the decimal
+    # mark, but PaddleOCR's English model occasionally reads the
+    # stylised italic dot as ``,`` (giving ``6,03M`` instead of
+    # ``6.03M``). Convert before ``_denoise`` strips the comma.
+    text = raw.replace(",", ".")
+    text = _denoise(text)
+    # Either an original digit OR a K/M suffix is required. Without an
+    # anchor we'd fabricate a value out of pure-letter junk like ``LE``
+    # via confusables. ``IK`` / ``TM`` style readings ARE accepted -
+    # the K/M suffix itself is a strong "this is a money cell" anchor
+    # and we want to recover ``1K`` / ``7M`` from those.
+    if not (_has_digit(text) or any(ch in "KkMm" for ch in text)):
         return None
     # Allow K/M to survive confusable substitution.
     text = _apply_confusables(text, allow_chars="KkMm.")
     text = text.upper().rstrip(".")
     if not text:
         return None
+    # Trailing K-misread recovery: a stylised italic capital ``K``
+    # sometimes comes back as ``K3`` / ``K4`` (the K's lower-right
+    # serif is glued to a neighbour glyph and read as a digit). E.g.
+    # ``857K`` -> ``857K4``, ``117.1K`` (period dropped) -> ``1171K3``.
+    # Strip the stray trailing 3/4 BEFORE the regex match so the
+    # value validates as ``\d+K``.
+    text = re.sub(r"(\d)K[34]$", r"\1K", text)
     m = _TOTAL_BET_RE.match(text)
     if not m:
         return None
@@ -175,10 +189,14 @@ def sanitise_total_count(raw: Optional[str]) -> Optional[str]:
     if not raw:
         return None
     text = _denoise(raw)
-    # Same rationale as total_bet: don't fabricate a number out of
-    # text that had no digits to begin with ("to" -> "0", "LE" -> "13",
-    # etc.).
-    if not _has_digit(text):
+    # Counts have no suffix to anchor against, so the rule is weaker
+    # than total_bet's: accept if the text has an original digit, OR
+    # at least 2 confusable letters (``III`` -> ``111``, ``IS`` ->
+    # ``15``, ``ISI`` -> ``151`` are real recoveries from the live
+    # game). The 2-char minimum stops single-character junk like ``s``
+    # / ``l`` from being fabricated into ``5`` / ``1``.
+    confusable_count = sum(1 for ch in text if ch in _DIGIT_CONFUSABLES)
+    if not (_has_digit(text) or confusable_count >= 2):
         return None
     # NB: counts apply confusables BEFORE stripping non-digits (the
     # opposite of sanitise_percent). The asymmetry is deliberate -
@@ -201,6 +219,9 @@ def sanitise_total_count(raw: Optional[str]) -> Optional[str]:
 _PERCENT_NUM_RE = re.compile(r"\d{1,3}")
 
 
+_PERCENT_KEEP_SLASH_RE = re.compile(r"[\s'\"`,\\]+")
+
+
 def sanitise_percent(raw: Optional[str]) -> Optional[str]:
     """Clean a ``percent_cell`` OCR value.
 
@@ -208,32 +229,44 @@ def sanitise_percent(raw: Optional[str]) -> Optional[str]:
     ``58%`` etc., but if the bbox over-extends, OCR can return things
     like ``CHAN 47%`` or even part of a money amount. We extract the
     first 1-3 digit number, validate it's 0..100, and append ``%``.
+
+    Three-stage match strategy (each later stage is a fallback for
+    when the prior one fails to produce a valid 0..100 value):
+
+    1. ``%``-anchored: ``(\\d{1,3})\\s*%`` against the raw text. This
+       cleanly handles trailing OCR junk like ``12%6`` / ``40%6`` by
+       only taking the digits before the ``%``.
+    2. Fully denoised: strip noise (incl. ``/``) and take the first
+       digit run. Recovers values like ``1/0`` -> ``10%`` (where the
+       slash was a stray artefact between the ``1`` and ``0``).
+    3. Slash-as-boundary: strip noise but KEEP ``/``, then take the
+       first digit run. Recovers ``79/0`` -> ``79%`` (where ``%`` was
+       mis-rendered as ``/0`` and we want ``/`` to act as a digit-run
+       boundary, not be silently dropped).
     """
     if not raw:
         return None
-    text = _denoise(raw)
-    # Same rationale as total_bet / total_count: don't fabricate a
-    # percent out of text that had no digits to begin with
-    # ("LE" -> "13" -> "13%", "SO" -> "50%", "GO" -> "60%", etc.).
-    if not _has_digit(text):
-        return None
-    # Drop literal ``%`` to make the regex simpler; we re-attach it.
-    text = text.replace("%", "")
-    # Strip non-digit chars BEFORE confusable substitution. This stops
-    # trailing noise letters from being merged into the digit run -
-    # e.g. "58b%" -> "58b" -> "58" (correct) instead of "58b" ->
-    # confusables "b->6" -> "586" -> rejected as >100. Trade-off: we
-    # lose the ability to recover "5O" -> "50" via confusables, but
-    # PaddleOCR much more commonly produces "50" or trailing junk
-    # ("58b") than embedded letter-as-digit ("5O") for percent cells.
-    text = re.sub(r"\D", "", text)
-    m = _PERCENT_NUM_RE.search(text)
-    if not m:
-        return None
-    val = int(m.group(0))
-    if not (0 <= val <= 100):
-        return None
-    return f"{val}%"
+    # Stage 1: ``%``-anchored.
+    m = re.search(r"(\d{1,3})\s*%", raw)
+    if m:
+        val = int(m.group(1))
+        if 0 <= val <= 100:
+            return f"{val}%"
+    # Stage 2: fully denoised (slash stripped).
+    text_b = _denoise(raw).replace("%", "")
+    m = _PERCENT_NUM_RE.search(text_b)
+    if m:
+        val = int(m.group(0))
+        if 0 <= val <= 100:
+            return f"{val}%"
+    # Stage 3: slash kept as digit boundary.
+    text_a = _PERCENT_KEEP_SLASH_RE.sub("", raw).replace("%", "")
+    m = _PERCENT_NUM_RE.search(text_a)
+    if m:
+        val = int(m.group(0))
+        if 0 <= val <= 100:
+            return f"{val}%"
+    return None
 
 
 # Mapping consumed by pipeline.py: { cell-class-name: sanitiser-fn }.

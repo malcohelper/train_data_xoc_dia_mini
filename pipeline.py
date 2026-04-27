@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from cell_preprocessor import preprocess as preprocess_cell
 from classes import CLASS_NAME_TO_ID
 from detector import Detection, XocDiaDetector
 from ocr_postprocess import sanitise as sanitise_ocr
@@ -239,7 +240,8 @@ class GameAnalysisPipeline:
                 bet_type = self._assign_cell_to_area(cell, areas)
                 if bet_type is None:
                     continue
-                raw = self.ocr.read_text(self.detector.crop(frame, cell))
+                crop = preprocess_cell(cell_class, self.detector.crop(frame, cell))
+                raw = self.ocr.read_text(crop)
                 cleaned = self._sanitise(cell_class, raw)
                 bet = state.bets.setdefault(bet_type, BetState(bet_type=bet_type))
                 setattr(bet, slot, cleaned)
@@ -252,7 +254,8 @@ class GameAnalysisPipeline:
             if row_idx >= len(self.percent_row_order):
                 break
             bet_type = self.percent_row_order[row_idx]
-            raw = self.ocr.read_text(self.detector.crop(frame, cell))
+            crop = preprocess_cell("percent_cell", self.detector.crop(frame, cell))
+            raw = self.ocr.read_text(crop)
             cleaned = self._sanitise("percent_cell", raw)
             bet = state.bets.setdefault(bet_type, BetState(bet_type=bet_type))
             bet.percent = cleaned

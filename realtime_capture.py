@@ -29,10 +29,11 @@ Hotkeys:
 
 import json
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import cv2
 import mss
@@ -66,6 +67,11 @@ class Round:
     round_id: str                                   # timestamp-based id
     started_at: str                                 # ISO timestamp
     percent: Dict[str, Optional[str]] = field(default_factory=dict)
+    # Per-area history of every sanitised percent reading observed
+    # during the [46,48] timer window. Resolved into ``percent`` via
+    # majority vote at finalisation. Multi-frame consensus protects us
+    # against a single bad OCR frame in a 2-3 frame window.
+    percent_history: Dict[str, List[str]] = field(default_factory=dict)
     bets: Dict[str, Dict[str, Optional[str]]] = field(
         default_factory=lambda: {k: {"total_bet": None, "total_count": None} for k in BET_TYPES}
     )
@@ -83,11 +89,24 @@ class Round:
                 slot["total_count"] = bet.total_count
 
     def update_percent(self, state: GameState) -> None:
-        # Only overwrite slots we haven't captured yet; the scoreboard is
-        # stable for the duration of the round so the first read is best.
+        """Append every non-null sanitised percent reading to history.
+        Resolution to a single value per area is deferred to
+        ``finalise_percent`` so all in-window reads vote together."""
         for bet_type, bet in state.bets.items():
-            if bet.percent and not self.percent.get(bet_type):
-                self.percent[bet_type] = bet.percent
+            if bet.percent:
+                self.percent_history.setdefault(bet_type, []).append(bet.percent)
+
+    def finalise_percent(self) -> None:
+        """Collapse ``percent_history`` to a single value per area by
+        majority vote. ``Counter.most_common`` is deterministic and
+        stable; on ties the first-seen reading wins, which matches the
+        previous "first-read wins" behaviour while letting later good
+        reads outvote a single-frame OCR error."""
+        for bet_type, readings in self.percent_history.items():
+            if not readings:
+                continue
+            winner, _ = Counter(readings).most_common(1)[0]
+            self.percent[bet_type] = winner
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -177,6 +196,9 @@ class RoundTracker:
         self.current.finalised_at = datetime.now().isoformat(timespec="seconds")
         # Make sure any late bet updates are captured.
         self.current.update_bets(state)
+        # Collapse the multi-frame percent history into a single value
+        # per area before logging / saving.
+        self.current.finalise_percent()
         self._save_round(self.current, frame)
         finished = self.current
         self.current = None

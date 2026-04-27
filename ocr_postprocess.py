@@ -53,6 +53,8 @@ _DIGIT_CONFUSABLES = {
     "L": "1",
     "|": "1",
     "!": "1",
+    "J": "1",  # PP-OCRv5 reads stylised italic ``1.45M`` as ``J.45M``.
+    "j": "1",
     "Z": "2",
     "z": "2",
     "E": "3",
@@ -98,9 +100,11 @@ def _has_digit(text: str) -> bool:
 # ---- per-class sanitisers ---------------------------------------------------
 
 
-# Money values: 1-4 digits, optional decimal part, optional K/M suffix.
-# Matches: ``45``, ``4266``, ``795K``, ``7.47M``, ``13.84M``.
-_TOTAL_BET_RE = re.compile(r"^(\d{1,4})(?:\.(\d{1,3}))?([KkMm])?$")
+# Money values: 1-5 digits, optional decimal part, optional K/M suffix.
+# Matches: ``45``, ``4266``, ``795K``, ``7.47M``, ``13.84M`` and the
+# K-misread shapes we recover below (``7674`` -> ``767K``,
+# ``32814`` -> ``328K``).
+_TOTAL_BET_RE = re.compile(r"^(\d{1,5})(?:\.(\d{1,3}))?([KkMm])?$")
 
 
 def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
@@ -135,15 +139,19 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
         out += suffix
     else:
         # PaddleOCR confusable: the trailing ``K`` of a money value
-        # like ``767K`` is sometimes recognised as ``4``, leaving a
-        # plain 4-digit number that survives the regex (e.g. ``7674``).
-        # The game UI always shows a ``K``/``M`` suffix for values
-        # >= 1000, so a 4-digit plain integer ending in ``4`` is much
-        # more likely a misread ``XXXK`` than a legitimate 4-digit bet.
-        # Recover it. This may false-positive on legitimate values like
-        # ``1234`` (rare in this game), so we accept the small risk in
-        # exchange for fixing the much more common K-misread.
-        if frac is None and len(out) == 4 and out.endswith("4"):
+        # like ``767K`` is sometimes recognised as a digit. We've
+        # observed two flavours of this misread on the live game:
+        #   1) ``K`` -> ``4``  (e.g. ``767K`` -> ``7674``)
+        #   2) ``K`` -> ``14`` (e.g. ``328K`` -> ``32814``)
+        # The game UI always uses a ``K``/``M`` suffix for values
+        # >= 1000, so a plain 4-digit integer ending in ``4`` or a
+        # 5-digit integer ending in ``14`` is much more likely to be a
+        # misread ``XXXK`` than a legit 4/5-digit bet. Recover both.
+        # This may false-positive on legit values like ``1234`` /
+        # ``32114`` (rare in this game).
+        if frac is None and len(out) == 5 and out.endswith("14"):
+            out = out[:-2] + "K"
+        elif frac is None and len(out) == 4 and out.endswith("4"):
             out = out[:-1] + "K"
     return out
 

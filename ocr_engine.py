@@ -6,22 +6,41 @@ import numpy as np
 
 class XocDiaOCR:
     def __init__(self):
-        base_kwargs = {
-            "use_angle_cls": True,
+        # The Xoc Dia game UI uses a stylised italic gold/cyan font for
+        # money / count / percent values. PaddleOCR's auto-orientation
+        # classifiers (``doc_orientation`` + ``textline_orientation``)
+        # routinely mis-classify these glyphs as rotated 180 degrees
+        # and silently flip the image - that is why we used to see
+        # ``2.04M`` come back as ``W50'2`` (mirror of M=W, 5=S, .='),
+        # ``5.02M`` as ``N2D'S``, ``31`` as ``IE``, etc.
+        #
+        # Our cells are already cropped horizontally LTR by YOLO, so
+        # orientation classification has no signal it can usefully
+        # contribute - it only hurts us. We disable all three
+        # orientation steps in PaddleOCR 3.x and fall back to
+        # ``use_angle_cls=False`` on the older 2.x API.
+        v3_kwargs = {
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
             "lang": "en",
         }
         try:
-            self.ocr = PaddleOCR(**base_kwargs, show_log=False)
+            self.ocr = PaddleOCR(**v3_kwargs)
         except (TypeError, ValueError):
+            v2_kwargs = {"use_angle_cls": False, "lang": "en"}
             try:
-                self.ocr = PaddleOCR(**base_kwargs)
-            except ModuleNotFoundError as e:
-                if str(e).find("paddle") != -1:
-                    raise ModuleNotFoundError(
-                        "Missing dependency 'paddlepaddle'. "
-                        "Install it in your venv, e.g. `pip install paddlepaddle`."
-                    ) from e
-                raise
+                self.ocr = PaddleOCR(**v2_kwargs, show_log=False)
+            except (TypeError, ValueError):
+                try:
+                    self.ocr = PaddleOCR(**v2_kwargs)
+                except ModuleNotFoundError as e:
+                    if str(e).find("paddle") != -1:
+                        raise ModuleNotFoundError(
+                            "Missing dependency 'paddlepaddle'. "
+                            "Install it in your venv, e.g. `pip install paddlepaddle`."
+                        ) from e
+                    raise
 
     def _run_ocr(self, image):
         """PaddleOCR 3.x: ocr() -> predict(); no 'cls' kwarg (use_textline_orientation in predict)."""

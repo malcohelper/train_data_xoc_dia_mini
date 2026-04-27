@@ -391,8 +391,17 @@ class RealtimeCapture:
                     last_detect = now
                     finished = self.tracker.ingest(state, frame)
                     if self.diag:
-                        n_dets = len(getattr(state, "raw_detections", []) or [])
-                        cur_id = self.tracker.current.round_id if self.tracker.current else "-"
+                        n_dets = len(state.raw_detections)
+                        # On the tick that finalises a round, ``current``
+                        # has just been cleared inside ``ingest``; prefer
+                        # ``finished.round_id`` so the diag line for that
+                        # tick still shows which round it belonged to.
+                        if finished is not None:
+                            cur_id = finished.round_id
+                        elif self.tracker.current is not None:
+                            cur_id = self.tracker.current.round_id
+                        else:
+                            cur_id = "-"
                         print(
                             f"[diag] phase={state.phase} timer={state.timer} "
                             f"dice={state.dice_result} dets={n_dets} "

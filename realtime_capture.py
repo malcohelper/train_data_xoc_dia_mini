@@ -98,14 +98,19 @@ class Round:
 
     def finalise_percent(self) -> None:
         """Collapse ``percent_history`` to a single value per area by
-        majority vote. ``Counter.most_common`` is deterministic and
-        stable; on ties the first-seen reading wins, which matches the
-        previous "first-read wins" behaviour while letting later good
-        reads outvote a single-frame OCR error."""
+        majority vote, letting later good reads outvote a single-frame
+        OCR error. On ties (e.g. exactly one good and one bad read)
+        Counter.most_common's tie-break is implementation-defined, so we
+        explicitly pick the first-seen reading via ``readings.index`` to
+        match the previous "first-read wins" behaviour deterministically."""
         for bet_type, readings in self.percent_history.items():
             if not readings:
                 continue
-            winner, _ = Counter(readings).most_common(1)[0]
+            counts = Counter(readings)
+            top_count = counts.most_common(1)[0][1]
+            tied = [r for r, c in counts.items() if c == top_count]
+            # First-seen-among-tied wins.
+            winner = min(tied, key=readings.index)
             self.percent[bet_type] = winner
 
     def to_dict(self) -> Dict[str, object]:
@@ -162,8 +167,11 @@ class RoundTracker:
         # We're inside an active round -> always refresh bets/counts.
         # Percent is only captured in the round-start window (timer >= 46)
         # when the scoreboard has just ticked over for the new round and
-        # is visually stable. After that the update_percent call is a
-        # no-op even if more percent_cell detections come in.
+        # is visually stable. ``update_percent`` appends each non-null
+        # reading to ``percent_history`` for the majority-vote in
+        # ``finalise_percent``; the ``timer >= TIMER_NEW_ROUND_THRESHOLD``
+        # guard is what stops it from accumulating reads outside the
+        # window (``update_percent`` itself is no longer idempotent).
         if self.current is not None:
             self.current.update_bets(state)
             if timer is not None and timer >= TIMER_NEW_ROUND_THRESHOLD:
@@ -187,8 +195,12 @@ class RoundTracker:
             round_id=now.strftime("%Y%m%d_%H%M%S"),
             started_at=now.isoformat(timespec="seconds"),
         )
-        # Capture percent right away (scoreboard stable at round start).
-        self.current.update_percent(state)
+        # NOTE: do NOT call update_percent here. The caller (``ingest``)
+        # already does it for the same frame inside the
+        # ``timer >= TIMER_NEW_ROUND_THRESHOLD`` block. Calling it here
+        # too would double-count the first frame's reading in
+        # ``percent_history``, giving it 2x weight in the majority vote
+        # at finalisation.
 
     def _finalise_round(self, state: GameState, frame: np.ndarray) -> Round:
         assert self.current is not None

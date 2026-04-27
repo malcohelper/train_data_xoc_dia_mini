@@ -456,7 +456,9 @@ def _parse_args():
         help="Skip the ROI prompt at startup and use the default "
              "capture region (1280x800 at top-left of the primary "
              "display). You can still press 'r' inside the preview "
-             "window to select a region later.",
+             "window to select a region later. The ROI prompt is "
+             "preview-only and is also implicitly skipped when "
+             "--no-preview is set (no GUI to host the selector).",
     )
     parser.add_argument(
         "--log-ocr-rejects",

@@ -63,26 +63,64 @@ def list_windows() -> List[Dict[str, object]]:
     return list(raw)
 
 
+# Owners that almost never host the game we care about. We exclude
+# them by default when matching by ``--window-title`` only, because
+# the user's terminal / editor title typically contains the same
+# substring (it shows the cwd or the running command, e.g.
+# ``"...--window-title XÓC ĐĨA MINI..."``) and would otherwise out-rank
+# the actual game window in title-substring search. Pass an explicit
+# ``--window-owner`` to bypass this list (e.g. if the game IS being
+# screen-shared inside a Chrome tab, ``--window-owner Chrome``).
+_DEFAULT_OWNER_DENYLIST = {
+    "terminal",
+    "iterm",
+    "iterm2",
+    "warp",
+    "hyper",
+    "alacritty",
+    "kitty",
+    "wezterm",
+    "code",
+    "code - insiders",
+    "cursor",
+    "visual studio code",
+    "windsurf",
+    "python",  # IDLE / `python` window when run as `python -m`
+}
+
+
 def find_window(
     title_substring: Optional[str] = None,
     owner_substring: Optional[str] = None,
 ) -> Optional[WindowMatch]:
-    """Return the first on-screen window whose title and/or owner
+    """Return the largest on-screen window whose title and/or owner
     contains the given substrings (case-insensitive). When both are
     given, both must match. Returns ``None`` if no window matches.
+
+    When matching by title only, terminal / editor owners are skipped
+    by default (their titles tend to contain the user's command line
+    and would shadow the real target window). Pass an explicit
+    ``owner_substring`` to bypass that filter.
     """
     title_q = (title_substring or "").lower()
     owner_q = (owner_substring or "").lower()
     if not title_q and not owner_q:
         return None
 
+    candidates: List[WindowMatch] = []
     for w in list_windows():
         title = str(w.get("kCGWindowName", "") or "").strip()
         owner = str(w.get("kCGWindowOwnerName", "") or "").strip()
         if title_q and title_q not in title.lower():
             continue
-        if owner_q and owner_q not in owner.lower():
-            continue
+        if owner_q:
+            if owner_q not in owner.lower():
+                continue
+        else:
+            # Title-only match: drop terminals / editors whose title
+            # often contains the same substring as the target game.
+            if owner.lower() in _DEFAULT_OWNER_DENYLIST:
+                continue
         bounds = w.get("kCGWindowBounds") or {}
         try:
             # Quartz reports bounds in display *points* (not pixels).
@@ -101,14 +139,24 @@ def find_window(
         # bounds - skip those.
         if width < 100 or height < 100:
             continue
-        return WindowMatch(
+        candidates.append(WindowMatch(
             owner=owner, title=title,
             monitor={
                 "top": top, "left": left,
                 "width": width, "height": height,
             },
-        )
-    return None
+        ))
+
+    if not candidates:
+        return None
+    # Multiple matches: pick the largest by area. The actual game
+    # window is almost always larger than incidental matches like
+    # the Dock badge or a notification.
+    candidates.sort(
+        key=lambda m: m.monitor["width"] * m.monitor["height"],
+        reverse=True,
+    )
+    return candidates[0]
 
 
 class WindowTracker:

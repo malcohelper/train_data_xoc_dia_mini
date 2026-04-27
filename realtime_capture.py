@@ -266,6 +266,7 @@ class RealtimeCapture:
         window_title: Optional[str] = None,
         window_owner: Optional[str] = None,
         preview_fps: float = 10.0,
+        diag: bool = False,
     ):
         resolved = resolve_weights(weights)
         print(f"Model weights: {resolved}")
@@ -293,6 +294,7 @@ class RealtimeCapture:
         # cuts CPU drastically vs. the previous ~30 FPS busy loop.
         self.preview_fps = max(1.0, preview_fps)
         self._last_preview_render = 0.0
+        self.diag = diag
 
         # Optional macOS window tracker. When set we re-resolve the
         # window bounds every couple of seconds so the capture box
@@ -388,6 +390,25 @@ class RealtimeCapture:
                     self.last_state = state
                     last_detect = now
                     finished = self.tracker.ingest(state, frame)
+                    if self.diag:
+                        n_dets = len(state.raw_detections)
+                        # On the tick that finalises a round, ``current``
+                        # has just been cleared inside ``ingest``; prefer
+                        # ``finished.round_id`` so the diag line for that
+                        # tick still shows which round it belonged to.
+                        if finished is not None:
+                            cur_id = finished.round_id
+                        elif self.tracker.current is not None:
+                            cur_id = self.tracker.current.round_id
+                        else:
+                            cur_id = "-"
+                        print(
+                            f"[diag] phase={state.phase} timer={state.timer} "
+                            f"dice={state.dice_result} dets={n_dets} "
+                            f"round={cur_id} mon={self.monitor['width']}x"
+                            f"{self.monitor['height']}@({self.monitor['left']},"
+                            f"{self.monitor['top']})"
+                        )
                     if finished is not None:
                         print(self.tracker.format_log(finished))
 
@@ -522,6 +543,14 @@ def _parse_args():
              "reduce CPU on slow machines. Detection still runs on its "
              "own --interval schedule independently.",
     )
+    parser.add_argument(
+        "--diag",
+        action="store_true",
+        help="Print one diagnostic line per detection tick "
+             "(phase, timer, dice_result, det count, monitor bounds). "
+             "Use this to verify detection is firing and YOLO is "
+             "returning boxes when round summaries stop appearing.",
+    )
     return parser.parse_args()
 
 
@@ -553,5 +582,6 @@ if __name__ == "__main__":
         window_title=args.window_title,
         window_owner=args.window_owner,
         preview_fps=args.preview_fps,
+        diag=args.diag,
     )
     cap.start(interval=args.interval, show_preview=not args.no_preview)

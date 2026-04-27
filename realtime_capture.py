@@ -436,6 +436,17 @@ class RealtimeCapture:
         if key == ord("q"):
             self.running = False
         elif key == ord("r"):
+            # The window tracker re-resolves the monitor every poll
+            # interval (~2s) and would silently overwrite the user's
+            # manual selection. Drop the tracker the moment the user
+            # asks for a manual region - they've explicitly chosen to
+            # override window tracking.
+            if self.window_tracker is not None:
+                print(
+                    "[window-capture] Manual region selected; disabling "
+                    "window tracker for this session."
+                )
+                self.window_tracker = None
             self.select_region_with_mouse()
         elif key == ord("s"):
             cv2.imwrite("preview_capture.png", frame)

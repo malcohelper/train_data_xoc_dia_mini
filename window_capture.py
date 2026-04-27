@@ -85,6 +85,12 @@ def find_window(
             continue
         bounds = w.get("kCGWindowBounds") or {}
         try:
+            # Quartz reports bounds in display *points* (not pixels).
+            # ``mss`` on macOS also takes monitor coords in points, so
+            # passing these through directly is correct for the common
+            # single-display Retina setup. Mixed-DPI multi-monitor
+            # configurations can theoretically misbehave; we'll cross
+            # that bridge if a user reports mis-aligned crops.
             left = int(bounds["X"])
             top = int(bounds["Y"])
             width = int(bounds["Width"])

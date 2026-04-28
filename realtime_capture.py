@@ -23,6 +23,8 @@ Round lifecycle (one pass of the loop logs exactly once per round):
 
 Hotkeys:
     r  select capture region by drag-select on full screen
+       (auto-tightens to the detected UI bbox after selection)
+    c  re-tighten the current region to the detected UI bbox
     s  save current preview frame to preview_capture.png
     q  quit
 """
@@ -320,12 +322,99 @@ class RealtimeCapture:
         else:
             print("Region selection cancelled.")
 
+    def auto_clamp_roi(
+        self,
+        clamp_imgsz: int = 1280,
+        margin: float = 0.05,
+        min_dets: int = 3,
+    ) -> bool:
+        """Run a single high-resolution YOLO pass on the current ROI
+        and tighten ``self.monitor`` to the union of all detections.
+
+        The default inference loop uses ``imgsz=800``, which downscales
+        large captured ROIs (e.g. the user dragged the whole desktop).
+        When the game ends up small in the input frame, the model
+        misses everything because it was trained on tightly-cropped
+        game windows. This one-shot pass at a larger ``imgsz`` recovers
+        detection in those wide ROIs, then we replace the monitor with
+        the bounding box of detected UI so subsequent ticks run at the
+        normal speed with the game filling the frame.
+
+        Returns ``True`` when the monitor was updated, ``False`` when
+        the pass found too few detections to trust the bbox (we keep
+        the user's original ROI in that case so they can re-drag).
+        """
+        frame = self.capture()
+        try:
+            results = self.detector.model(
+                frame,
+                conf=self.detector.conf,
+                iou=self.detector.iou,
+                device=self.detector.device,
+                imgsz=clamp_imgsz,
+                verbose=False,
+            )[0]
+        except Exception as exc:  # noqa: BLE001
+            print(f"[auto-clamp] YOLO pass failed: {exc!r}; keeping ROI.")
+            return False
+
+        if results.boxes is None or len(results.boxes) < min_dets:
+            n = 0 if results.boxes is None else len(results.boxes)
+            print(
+                f"[auto-clamp] only {n} detection(s) in ROI at "
+                f"imgsz={clamp_imgsz} (need >={min_dets}); "
+                f"keeping ROI as-is. Try dragging tighter around the "
+                f"game window."
+            )
+            return False
+
+        xyxy = results.boxes.xyxy.cpu().numpy()
+        x1 = float(xyxy[:, 0].min())
+        y1 = float(xyxy[:, 1].min())
+        x2 = float(xyxy[:, 2].max())
+        y2 = float(xyxy[:, 3].max())
+
+        bw = x2 - x1
+        bh = y2 - y1
+        x1 -= bw * margin
+        y1 -= bh * margin
+        x2 += bw * margin
+        y2 += bh * margin
+
+        H, W = frame.shape[:2]
+        x1 = int(max(0, x1))
+        y1 = int(max(0, y1))
+        x2 = int(min(W, x2))
+        y2 = int(min(H, y2))
+        new_w = x2 - x1
+        new_h = y2 - y1
+        if new_w <= 0 or new_h <= 0:
+            print("[auto-clamp] degenerate bbox; keeping ROI.")
+            return False
+
+        before = dict(self.monitor)
+        self.monitor = {
+            "top": int(self.monitor["top"] + y1),
+            "left": int(self.monitor["left"] + x1),
+            "width": int(new_w),
+            "height": int(new_h),
+        }
+        print(
+            f"[auto-clamp] tightened ROI from "
+            f"{before['width']}x{before['height']}@({before['left']},{before['top']}) "
+            f"to {self.monitor['width']}x{self.monitor['height']}"
+            f"@({self.monitor['left']},{self.monitor['top']}) "
+            f"using {len(results.boxes)} detection(s)."
+        )
+        return True
+
     # ---------- main loop ----------
     def start(
         self,
         interval: float = 1.0,
         show_preview: bool = True,
         auto_roi: bool = True,
+        auto_clamp: bool = True,
     ) -> None:
         if auto_roi and show_preview:
             # Pop the ROI selector immediately on start so the user
@@ -335,6 +424,14 @@ class RealtimeCapture:
             # this prompt detection silently produces ``dets=0`` until
             # the user remembers to press ``r``.
             self.select_region_with_mouse()
+        if auto_clamp:
+            # The model was trained on tightly-cropped game frames at
+            # imgsz=800. When the user drags an over-broad ROI the game
+            # is downscaled below the size the model can recognise. One
+            # high-resolution pass here lets us tighten the monitor to
+            # the actual UI bbox, after which the loop runs at normal
+            # speed without inflating per-tick imgsz.
+            self.auto_clamp_roi()
         print("Starting real-time detection. Hotkeys: r / s / q")
         last_detect = 0.0
         preview_period = 1.0 / self.preview_fps
@@ -436,6 +533,11 @@ class RealtimeCapture:
             self.running = False
         elif key == ord("r"):
             self.select_region_with_mouse()
+            # Re-running auto-clamp here mirrors the behaviour at startup:
+            # if the user re-drags a loose ROI we still tighten it for them.
+            self.auto_clamp_roi()
+        elif key == ord("c"):
+            self.auto_clamp_roi()
         elif key == ord("s"):
             cv2.imwrite("preview_capture.png", frame)
             print("Saved preview_capture.png")
@@ -459,6 +561,17 @@ def _parse_args():
              "window to select a region later. The ROI prompt is "
              "preview-only and is also implicitly skipped when "
              "--no-preview is set (no GUI to host the selector).",
+    )
+    parser.add_argument(
+        "--no-auto-clamp",
+        action="store_true",
+        help="Skip the one-shot YOLO pass at startup that tightens "
+             "the ROI to the detected UI bbox. By default we run a "
+             "single inference at imgsz=1280 immediately after the "
+             "region is set so a loose drag still produces a frame "
+             "where the game fills the input. Disable this if you "
+             "are intentionally capturing a non-game region or want "
+             "to skip the extra ~0.5s startup cost.",
     )
     parser.add_argument(
         "--log-ocr-rejects",
@@ -511,4 +624,5 @@ if __name__ == "__main__":
         interval=args.interval,
         show_preview=not args.no_preview,
         auto_roi=not args.no_auto_roi,
+        auto_clamp=not args.no_auto_clamp,
     )

@@ -300,7 +300,13 @@ class RealtimeCapture:
         img = np.array(self.sct.grab(self.monitor))
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
-    def select_region_with_mouse(self) -> None:
+    def select_region_with_mouse(self) -> bool:
+        """Prompt the user to drag a new ROI on the full screen.
+
+        Returns ``True`` when ``self.monitor`` was updated, ``False``
+        when the user cancelled (ESC / zero-size drag). Callers can use
+        this to skip follow-up work (e.g. auto-clamp) on cancellation.
+        """
         full_monitor = self.sct.monitors[1]
         full_img = np.array(self.sct.grab(full_monitor))
         full_img = cv2.cvtColor(full_img, cv2.COLOR_BGRA2BGR)
@@ -319,8 +325,9 @@ class RealtimeCapture:
                 "height": int(h),
             }
             print(f"Updated region: {self.monitor}")
-        else:
-            print("Region selection cancelled.")
+            return True
+        print("Region selection cancelled.")
+        return False
 
     def auto_clamp_roi(
         self,
@@ -416,6 +423,7 @@ class RealtimeCapture:
         auto_roi: bool = True,
         auto_clamp: bool = True,
     ) -> None:
+        roi_set = False
         if auto_roi and show_preview:
             # Pop the ROI selector immediately on start so the user
             # can drag-select the game window before detection begins.
@@ -423,11 +431,11 @@ class RealtimeCapture:
             # never matches the user's actual game window, so without
             # this prompt detection silently produces ``dets=0`` until
             # the user remembers to press ``r``.
-            self.select_region_with_mouse()
+            roi_set = self.select_region_with_mouse()
         # Persist the flag so the 'r' hotkey honours --no-auto-clamp
         # at runtime too (not just at startup).
         self.auto_clamp = auto_clamp
-        if auto_clamp and auto_roi and show_preview:
+        if auto_clamp and roi_set:
             # The model was trained on tightly-cropped game frames at
             # imgsz=800. When the user drags an over-broad ROI the game
             # is downscaled below the size the model can recognise. One
@@ -435,14 +443,15 @@ class RealtimeCapture:
             # the actual UI bbox, after which the loop runs at normal
             # speed without inflating per-tick imgsz.
             #
-            # Gated on ``auto_roi and show_preview`` because that's the
-            # only case where we know the user just chose a region that
-            # actually contains the game UI. With --no-auto-roi or
-            # --no-preview the monitor is either the unchanged default
-            # 1280x800@(0,0) (almost never the right region) or a
-            # programmatically pre-set monitor (caller can invoke
-            # ``auto_clamp_roi()`` directly if they want it tightened),
-            # so we skip the wasted ~0.5s startup pass.
+            # Gated on ``roi_set`` (which already implies
+            # ``auto_roi and show_preview``) so we only run the clamp
+            # when the user actually picked a fresh region. With
+            # --no-auto-roi, --no-preview, or a cancelled ROI dialog
+            # the monitor is either the unchanged default 1280x800@(0,0)
+            # (almost never the right region) or a programmatically
+            # pre-set monitor (caller can invoke ``auto_clamp_roi()``
+            # directly if they want it tightened), so we skip the
+            # wasted ~0.5s startup pass.
             self.auto_clamp_roi()
         print("Starting real-time detection. Hotkeys: r / c / s / q")
         last_detect = 0.0
@@ -544,13 +553,16 @@ class RealtimeCapture:
         if key == ord("q"):
             self.running = False
         elif key == ord("r"):
-            self.select_region_with_mouse()
+            changed = self.select_region_with_mouse()
             # Re-running auto-clamp here mirrors the behaviour at startup:
             # if the user re-drags a loose ROI we still tighten it for
             # them. Honour --no-auto-clamp by checking the persisted
             # flag; 'c' below is still always-on because it's an
-            # explicit, user-initiated action.
-            if getattr(self, "auto_clamp", True):
+            # explicit, user-initiated action. Skip the clamp pass
+            # entirely when the user cancelled the ROI dialog so they
+            # don't see a confusing 0.5s pause + log line right after
+            # bailing out.
+            if changed and getattr(self, "auto_clamp", True):
                 self.auto_clamp_roi()
         elif key == ord("c"):
             self.auto_clamp_roi()

@@ -333,10 +333,14 @@ class RealtimeCapture:
         self,
         clamp_imgsz: int = 1280,
         margin: float = 0.05,
-        min_dets: int = 3,
+        min_dets: int = 2,
+        attempts: int = 3,
+        attempt_gap_s: float = 0.3,
+        warmup_s: float = 0.5,
+        clamp_conf: float = 0.20,
     ) -> bool:
-        """Run a single high-resolution YOLO pass on the current ROI
-        and tighten ``self.monitor`` to the union of all detections.
+        """Run a high-resolution YOLO pass on the current ROI and
+        tighten ``self.monitor`` to the union of all detections.
 
         The default inference loop uses ``imgsz=800``, which downscales
         large captured ROIs (e.g. the user dragged the whole desktop).
@@ -347,34 +351,72 @@ class RealtimeCapture:
         the bounding box of detected UI so subsequent ticks run at the
         normal speed with the game filling the frame.
 
+        Robustness notes (PR #22):
+          * ``warmup_s`` sleeps before the first capture so the OpenCV
+            ROI dialog has time to fully tear down (otherwise its
+            window can still be visible in the captured frame and the
+            game underneath is occluded).
+          * We retry up to ``attempts`` times with ``attempt_gap_s``
+            between captures and keep the result with the most
+            detections - the very first frame is the most likely to be
+            polluted by dialog dismissal artifacts or window-manager
+            repaint.
+          * ``clamp_conf`` defaults to a lower threshold than the loop
+            because we only need to find the rough UI bbox here, not
+            decide game state.
+          * ``min_dets=2`` (was 3) - two boxes already give a useful
+            envelope; raising the bar to 3 was rejecting legitimately-
+            small first-attempt frames.
+
         Returns ``True`` when the monitor was updated, ``False`` when
         the pass found too few detections to trust the bbox (we keep
         the user's original ROI in that case so they can re-drag).
         """
-        frame = self.capture()
-        try:
-            results = self.detector.model(
-                frame,
-                conf=self.detector.conf,
-                iou=self.detector.iou,
-                device=self.detector.device,
-                imgsz=clamp_imgsz,
-                verbose=False,
-            )[0]
-        except Exception as exc:  # noqa: BLE001
-            print(f"[auto-clamp] YOLO pass failed: {exc!r}; keeping ROI.")
-            return False
+        if warmup_s > 0:
+            time.sleep(warmup_s)
 
-        if results.boxes is None or len(results.boxes) < min_dets:
+        best_results = None
+        best_n = -1
+        best_frame_shape = None
+        for i in range(max(1, attempts)):
+            if i > 0 and attempt_gap_s > 0:
+                time.sleep(attempt_gap_s)
+            frame = self.capture()
+            try:
+                results = self.detector.model(
+                    frame,
+                    conf=clamp_conf,
+                    iou=self.detector.iou,
+                    device=self.detector.device,
+                    imgsz=clamp_imgsz,
+                    verbose=False,
+                )[0]
+            except Exception as exc:  # noqa: BLE001
+                print(f"[auto-clamp] attempt {i+1} YOLO pass failed: {exc!r}")
+                continue
             n = 0 if results.boxes is None else len(results.boxes)
+            print(f"[auto-clamp] attempt {i+1}/{attempts}: {n} detection(s)")
+            if n > best_n:
+                best_n = n
+                best_results = results
+                best_frame_shape = frame.shape[:2]
+            # Early-exit: a clearly-good attempt (>= ~half the full UI
+            # set: 6 areas + timer + 6 total_bet + 6 total_count + 6
+            # percent ~= 25 boxes; > 8 is plenty for a stable bbox).
+            if n >= 8:
+                break
+
+        if best_results is None or best_n < min_dets:
             print(
-                f"[auto-clamp] only {n} detection(s) in ROI at "
-                f"imgsz={clamp_imgsz} (need >={min_dets}); "
+                f"[auto-clamp] best attempt had {max(0, best_n)} detection(s) "
+                f"at imgsz={clamp_imgsz} conf={clamp_conf} (need >={min_dets}); "
                 f"keeping ROI as-is. Try dragging tighter around the "
                 f"game window."
             )
             return False
 
+        results = best_results
+        H, W = best_frame_shape  # type: ignore[misc]
         xyxy = results.boxes.xyxy.cpu().numpy()
         x1 = float(xyxy[:, 0].min())
         y1 = float(xyxy[:, 1].min())
@@ -388,7 +430,6 @@ class RealtimeCapture:
         x2 += bw * margin
         y2 += bh * margin
 
-        H, W = frame.shape[:2]
         x1 = int(max(0, x1))
         y1 = int(max(0, y1))
         x2 = int(min(W, x2))

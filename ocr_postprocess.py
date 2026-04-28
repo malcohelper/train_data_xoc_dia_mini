@@ -140,6 +140,12 @@ def sanitise_total_bet(raw: Optional[str]) -> Optional[str]:
     # Strip the stray trailing 3/4 BEFORE the regex match so the
     # value validates as ``\d+K``.
     text = re.sub(r"(\d)K[34]$", r"\1K", text)
+    # Trailing M-misread recovery: PaddleOCR occasionally reads the
+    # italic ``M`` suffix as ``N`` (the leaning diagonals of an italic
+    # M can lose one stroke at low resolution, e.g. ``3.06M`` -> ``3.06N``).
+    # ``N`` is not a valid character in any money-cell shape, so a
+    # trailing standalone ``N`` is almost certainly a misread ``M``.
+    text = re.sub(r"N$", "M", text)
     m = _TOTAL_BET_RE.match(text)
     if not m:
         return None

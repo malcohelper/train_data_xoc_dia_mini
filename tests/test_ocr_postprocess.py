@@ -71,6 +71,15 @@ def test_total_bet_legacy_k_recovery_still_works():
     assert sanitise_total_bet("32814") == "328K"
 
 
+def test_total_bet_trailing_n_is_m_misread():
+    # Italic ``M`` suffix sometimes read as ``N``; recover to ``M``.
+    assert sanitise_total_bet("3.06N") == "3.06M"
+    assert sanitise_total_bet("1.45n") == "1.45M"
+    assert sanitise_total_bet("45N") == "45M"
+    # Non-trailing N still rejected (no digit-like role).
+    assert sanitise_total_bet("N3.06M") is None
+
+
 def test_total_bet_5digit_plain_int_rejects():
     # 5-digit values without a K/M-recovery candidate are bogus.
     assert sanitise_total_bet("12345") is None

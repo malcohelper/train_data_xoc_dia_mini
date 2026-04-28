@@ -424,15 +424,27 @@ class RealtimeCapture:
             # this prompt detection silently produces ``dets=0`` until
             # the user remembers to press ``r``.
             self.select_region_with_mouse()
-        if auto_clamp:
+        # Persist the flag so the 'r' hotkey honours --no-auto-clamp
+        # at runtime too (not just at startup).
+        self.auto_clamp = auto_clamp
+        if auto_clamp and auto_roi and show_preview:
             # The model was trained on tightly-cropped game frames at
             # imgsz=800. When the user drags an over-broad ROI the game
             # is downscaled below the size the model can recognise. One
             # high-resolution pass here lets us tighten the monitor to
             # the actual UI bbox, after which the loop runs at normal
             # speed without inflating per-tick imgsz.
+            #
+            # Gated on ``auto_roi and show_preview`` because that's the
+            # only case where we know the user just chose a region that
+            # actually contains the game UI. With --no-auto-roi or
+            # --no-preview the monitor is either the unchanged default
+            # 1280x800@(0,0) (almost never the right region) or a
+            # programmatically pre-set monitor (caller can invoke
+            # ``auto_clamp_roi()`` directly if they want it tightened),
+            # so we skip the wasted ~0.5s startup pass.
             self.auto_clamp_roi()
-        print("Starting real-time detection. Hotkeys: r / s / q")
+        print("Starting real-time detection. Hotkeys: r / c / s / q")
         last_detect = 0.0
         preview_period = 1.0 / self.preview_fps
         # Sleep granularity. Has to be small enough that hotkeys feel
@@ -507,7 +519,7 @@ class RealtimeCapture:
         )
         cv2.putText(
             preview,
-            "Hotkeys: r=region | s=save frame | q=quit",
+            "Hotkeys: r=region | c=clamp | s=save frame | q=quit",
             (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1,
         )
 
@@ -534,8 +546,12 @@ class RealtimeCapture:
         elif key == ord("r"):
             self.select_region_with_mouse()
             # Re-running auto-clamp here mirrors the behaviour at startup:
-            # if the user re-drags a loose ROI we still tighten it for them.
-            self.auto_clamp_roi()
+            # if the user re-drags a loose ROI we still tighten it for
+            # them. Honour --no-auto-clamp by checking the persisted
+            # flag; 'c' below is still always-on because it's an
+            # explicit, user-initiated action.
+            if getattr(self, "auto_clamp", True):
+                self.auto_clamp_roi()
         elif key == ord("c"):
             self.auto_clamp_roi()
         elif key == ord("s"):

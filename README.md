@@ -97,6 +97,8 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 # GPU-only:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# macOS-only (window picker, see "Capture source" below):
+# pip install pyobjc-framework-Quartz
 ```
 
 ## Repo layout
@@ -256,22 +258,41 @@ python pipeline.py --weights runs/detect/xocdia/weights/best.pt \
 # Detector only (no OCR / no state inference)
 python detector.py --weights runs/detect/xocdia/weights/best.pt --source frame.png
 
-# Real-time screen capture + analyze (drag-select ROI on start)
+# Real-time screen capture + analyze
 python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
-# A "Select Game Region" window pops immediately - drag the box around
-# the game UI (a loose drag is fine), then press ENTER/SPACE. Right
-# after that we run a single high-resolution YOLO pass and tighten
-# the capture region to the actual UI bbox, so the loop runs at the
-# default imgsz without losing detail. Press `r` later in the preview
-# to re-select (also auto-tightens), `c` to re-tighten without
-# re-selecting, `q` to quit. Pass `--no-auto-roi` to skip the prompt,
-# or `--no-auto-clamp` to skip the auto-tighten pass.
+# A small dialog pops immediately with two buttons:
+#   * "Pick Window" - lists the macOS app windows currently visible
+#     (Quartz/`pyobjc-framework-Quartz`); pick e.g. "Safari - XocDia"
+#     and the script captures exactly that window's bbox and follows
+#     it when you move/resize the window.
+#   * "Drag ROI"    - the original drag-rectangle flow on full screen.
+# Right after either choice we run a single high-resolution YOLO pass
+# and tighten the capture region to the detected UI bbox, so the loop
+# runs at the default imgsz without losing detail. Press `r` later in
+# the preview to re-pick (mirrors the startup flow), `c` to re-tighten
+# without re-picking, `q` to quit. Pass `--capture-mode window|roi` to
+# skip the dialog, `--no-auto-roi` to skip the picker entirely, or
+# `--no-auto-clamp` to skip the auto-tighten pass.
 ```
 
 Tune CPU usage on slow machines via `--preview-fps` (default 10;
 detection still runs on its own `--interval`, default 1s). Pass
 `--diag` to print one diagnostic line per detection tick (phase,
 timer, dice, det count, monitor bounds) when troubleshooting.
+
+#### Picking a window vs dragging a ROI
+
+The original "drag a rectangle" flow makes it very easy to drag past
+the game window into your terminal or another app, which then becomes
+part of the YOLO input frame and tanks detection rates because the
+game ends up squeezed in the smaller fraction of the captured pixels.
+Picking a window via Quartz sidesteps that entirely and also lets the
+script auto-follow the window when you reposition it (re-checked
+every 5 s by default, see `RealtimeCapture.window_refresh_interval`).
+
+The window picker requires `pyobjc-framework-Quartz` on macOS; on
+other platforms or when the package isn't installed `list_windows()`
+returns `[]` and the dialog falls back to drag-ROI.
 
 ### Analytics dashboard
 

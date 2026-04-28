@@ -43,6 +43,7 @@ import numpy as np
 
 from detector import XocDiaDetector  # noqa: F401 - kept for external callers
 from pipeline import BET_TYPES, GameAnalysisPipeline, GameState, PERCENT_ROW_ORDER
+import window_picker
 
 
 # Timer threshold that marks the start of a new round. The game resets the
@@ -295,6 +296,14 @@ class RealtimeCapture:
         self._last_preview_render = 0.0
         self.diag = diag
 
+        # Window-picker bookkeeping (PR #23). When the user picks a
+        # specific application window, ``window_id`` is the macOS
+        # CGWindowID we re-poll every ``window_refresh_interval`` s to
+        # follow move/resize. Stays ``None`` for drag-ROI captures.
+        self.window_id: Optional[int] = None
+        self.window_refresh_interval: float = 5.0
+        self._last_window_check: float = 0.0
+
     # ---------- capture ----------
     def capture(self) -> np.ndarray:
         img = np.array(self.sct.grab(self.monitor))
@@ -456,6 +465,103 @@ class RealtimeCapture:
         )
         return True
 
+    # ---------- window-picker capture ----------
+    def pick_window_via_dialog(self) -> bool:
+        """Enumerate windows via Quartz, pop a Tk listbox to choose
+        one, and set ``self.monitor`` / ``self.window_id`` to the
+        selected window's bbox.
+
+        Returns ``True`` when a window was picked, ``False`` on
+        cancel / empty list.
+        """
+        windows = window_picker.list_windows()
+        if not windows:
+            print(
+                "[window-picker] no windows available (Quartz missing or "
+                "non-macOS). Falling back to drag-ROI."
+            )
+            return False
+        chosen = window_picker.pick_window_dialog(windows)
+        if chosen is None:
+            print("[window-picker] cancelled.")
+            return False
+        x, y, w, h = chosen.bbox
+        self.monitor = {
+            "top": int(y), "left": int(x),
+            "width": int(w), "height": int(h),
+        }
+        self.window_id = chosen.window_id
+        self._last_window_check = time.time()
+        print(
+            f"[window-picker] capturing '{chosen.app_name} - "
+            f"{chosen.title or '(untitled)'}' "
+            f"({w}x{h} @ {x},{y}) id={chosen.window_id}"
+        )
+        return True
+
+    def _refresh_window_bounds(self) -> None:
+        """If we are tracking a specific window, re-fetch its bbox and
+        update ``self.monitor`` when it has moved/resized. No-op when
+        ``self.window_id`` is ``None`` or Quartz isn't available."""
+        if self.window_id is None:
+            return
+        bounds = window_picker.get_window_bounds(self.window_id)
+        if bounds is None:
+            print(
+                f"[window-picker] window id={self.window_id} no longer "
+                f"visible; keeping last-known bounds. Press 'r' to pick "
+                f"another window."
+            )
+            self.window_id = None
+            return
+        x, y, w, h = bounds
+        if (
+            x == self.monitor["left"]
+            and y == self.monitor["top"]
+            and w == self.monitor["width"]
+            and h == self.monitor["height"]
+        ):
+            return
+        self.monitor = {
+            "top": int(y), "left": int(x),
+            "width": int(w), "height": int(h),
+        }
+        print(
+            f"[window-picker] tracked window moved/resized -> "
+            f"{w}x{h} @ ({x},{y})"
+        )
+
+    def select_capture_source(self, mode: str = "auto") -> bool:
+        """Top-level entry-point used by ``start()`` and the ``r``
+        hotkey. ``mode``:
+
+        * ``"auto"``    - pop the 2-button dialog and dispatch.
+        * ``"window"``  - skip the dialog, go straight to window list.
+        * ``"roi"``     - skip the dialog, go straight to drag ROI.
+
+        Returns ``True`` when a region was selected (caller can then
+        run auto-clamp), ``False`` on cancel.
+        """
+        if mode == "auto":
+            choice = window_picker.pick_mode_dialog()
+        else:
+            choice = mode
+        if choice == "window":
+            picked = self.pick_window_via_dialog()
+            if picked:
+                return True
+            # Fall through to drag-ROI when window list was empty or
+            # the user cancelled, so the script doesn't silently start
+            # capturing the default 1280x800@(0,0) region.
+            return self.select_region_with_mouse()
+        if choice == "roi":
+            # Clear any previous window tracking when the user
+            # explicitly switches back to drag-ROI.
+            self.window_id = None
+            return self.select_region_with_mouse()
+        # cancel / unexpected
+        return False
+
     # ---------- main loop ----------
     def start(
         self,
@@ -463,19 +569,22 @@ class RealtimeCapture:
         show_preview: bool = True,
         auto_roi: bool = True,
         auto_clamp: bool = True,
+        capture_mode: str = "auto",
     ) -> None:
         roi_set = False
         if auto_roi and show_preview:
-            # Pop the ROI selector immediately on start so the user
-            # can drag-select the game window before detection begins.
-            # The default ``self.monitor`` (1280x800@(0,0)) almost
-            # never matches the user's actual game window, so without
-            # this prompt detection silently produces ``dets=0`` until
-            # the user remembers to press ``r``.
-            roi_set = self.select_region_with_mouse()
+            # Pop the capture-source picker immediately on start so the
+            # user can choose between Pick Window / Drag ROI before
+            # detection begins. The default ``self.monitor``
+            # (1280x800@(0,0)) almost never matches the user's actual
+            # game window, so without this prompt detection silently
+            # produces ``dets=0`` until the user remembers to press
+            # ``r``.
+            roi_set = self.select_capture_source(mode=capture_mode)
         # Persist the flag so the 'r' hotkey honours --no-auto-clamp
         # at runtime too (not just at startup).
         self.auto_clamp = auto_clamp
+        self._capture_mode = capture_mode
         if auto_clamp and roi_set:
             # The model was trained on tightly-cropped game frames at
             # imgsz=800. When the user drags an over-broad ROI the game
@@ -546,6 +655,17 @@ class RealtimeCapture:
                     self._last_preview_render = now
                     key = cv2.waitKey(1) & 0xFF
                     self._handle_hotkeys(key, frame)
+
+                # Follow window move/resize when in window-picker mode.
+                # Cheap call (single Quartz dict lookup) but throttled
+                # so we don't spam the API every preview tick.
+                if (
+                    self.window_id is not None
+                    and now - self._last_window_check
+                    >= self.window_refresh_interval
+                ):
+                    self._refresh_window_bounds()
+                    self._last_window_check = now
             except KeyboardInterrupt:
                 print("Stopped.")
                 break
@@ -594,15 +714,14 @@ class RealtimeCapture:
         if key == ord("q"):
             self.running = False
         elif key == ord("r"):
-            changed = self.select_region_with_mouse()
-            # Re-running auto-clamp here mirrors the behaviour at startup:
-            # if the user re-drags a loose ROI we still tighten it for
-            # them. Honour --no-auto-clamp by checking the persisted
-            # flag; 'c' below is still always-on because it's an
-            # explicit, user-initiated action. Skip the clamp pass
-            # entirely when the user cancelled the ROI dialog so they
-            # don't see a confusing 0.5s pause + log line right after
-            # bailing out.
+            # 'r' re-runs the same capture-source picker the user saw
+            # at startup so they can switch between window/ROI any
+            # time. Auto-clamp still runs for fresh selections as long
+            # as --no-auto-clamp wasn't passed; cancellation skips
+            # clamp so the user doesn't see a confusing 0.5s pause +
+            # log line right after bailing out.
+            mode = getattr(self, "_capture_mode", "auto")
+            changed = self.select_capture_source(mode=mode)
             if changed and getattr(self, "auto_clamp", True):
                 self.auto_clamp_roi()
         elif key == ord("c"):
@@ -677,6 +796,18 @@ def _parse_args():
              "Use this to verify detection is firing and YOLO is "
              "returning boxes when round summaries stop appearing.",
     )
+    parser.add_argument(
+        "--capture-mode",
+        choices=("auto", "window", "roi"),
+        default="auto",
+        help="How to choose the capture region at startup. 'auto' "
+             "(default) pops a small dialog with two buttons - "
+             "'Pick Window' (list app windows via Quartz on macOS) "
+             "and 'Drag ROI' (the previous drag-rectangle flow). "
+             "'window' / 'roi' skip the dialog and go straight to "
+             "the matching picker. Set --no-auto-roi to skip the "
+             "picker entirely and start with the default monitor.",
+    )
     return parser.parse_args()
 
 
@@ -694,4 +825,5 @@ if __name__ == "__main__":
         show_preview=not args.no_preview,
         auto_roi=not args.no_auto_roi,
         auto_clamp=not args.no_auto_clamp,
+        capture_mode=args.capture_mode,
     )

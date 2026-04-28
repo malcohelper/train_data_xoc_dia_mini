@@ -254,9 +254,13 @@ python detector.py --weights runs/detect/xocdia/weights/best.pt --source frame.p
 # Real-time screen capture + analyze (drag-select ROI on start)
 python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
 # A "Select Game Region" window pops immediately - drag the box around
-# just the game UI, then press ENTER/SPACE. Press `r` later in the
-# preview to re-select, `q` to quit. Pass `--no-auto-roi` to skip
-# the prompt and start with the default region (1280x800@(0,0)).
+# the game UI (a loose drag is fine), then press ENTER/SPACE. Right
+# after that we run a single high-resolution YOLO pass and tighten
+# the capture region to the actual UI bbox, so the loop runs at the
+# default imgsz without losing detail. Press `r` later in the preview
+# to re-select (also auto-tightens), `c` to re-tighten without
+# re-selecting, `q` to quit. Pass `--no-auto-roi` to skip the prompt,
+# or `--no-auto-clamp` to skip the auto-tighten pass.
 ```
 
 Tune CPU usage on slow machines via `--preview-fps` (default 10;

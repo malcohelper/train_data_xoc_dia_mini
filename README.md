@@ -120,6 +120,11 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 │   ├── images/{raw,train,val}
 │   └── labels/{raw,train,val}
 ├── rounds/                   # per-round PNG + JSON snapshots
+├── analytics/
+│   ├── serve.py              # `python -m analytics.serve` - static HTML +
+│   │                         #   /api/rounds.json endpoint
+│   ├── index.html            # dashboard (Tailwind CDN)
+│   └── app.js                # Chẵn/Lẻ + vị stats + Big Road renderer
 └── tools/
     ├── rounds_to_dataset.py          # copy rounds/*.png into dataset/images/raw/
     ├── migrate_labels_15class.py     # one-shot: 17-class -> 15-class label remap
@@ -267,6 +272,25 @@ Tune CPU usage on slow machines via `--preview-fps` (default 10;
 detection still runs on its own `--interval`, default 1s). Pass
 `--diag` to print one diagnostic line per detection tick (phase,
 timer, dice, det count, monitor bounds) when troubleshooting.
+
+### Analytics dashboard
+
+`analytics/` is a small static page that reads the `rounds/*.json`
+dumps written by `realtime_capture.py` and renders a Chẵn/Lẻ
+progress card, per-dice-combo (4-trắng / 3T1Đ / 2T2Đ / 3Đ1T / 4-đỏ)
+stats, and a Baccarat-style 6-row Big Road. It polls `/api/rounds.json`
+every 3 seconds so a live capture session updates the dashboard in
+the browser without a reload.
+
+```bash
+# From the repo root, with realtime_capture.py writing to ./rounds
+python -m analytics.serve                          # http://127.0.0.1:8000
+python -m analytics.serve --rounds-dir ~/captures/rounds --port 8080
+```
+
+The time-range filter defaults to `[first round, latest round]` and
+follows new rounds automatically. Click `AUTO` (or edit either date)
+to pin a historical window; click again to re-enable follow.
 
 ## Dataset sizing
 

@@ -107,40 +107,26 @@ HIDDEN_IMPORTS = list(set(
 
 
 # ---------------------------------------------------------------------------
-# Excludes: bundle size hygiene. PaddleOCR 3.x's transitive deps include
-# enormous packages we never call into at inference time. These ARE safe
-# to drop because:
-#   * matplotlib / pandas / polars / sympy: only used by paddlex's CLI
-#     and report tooling, not by ``PaddleOCR.predict``.
-#   * modelscope / huggingface_hub: cloud model registries; we ship the
-#     YOLO weights ourselves and PaddleOCR caches its checkpoints
-#     locally on first run.
-#   * pypdfium2: PDF rendering for paddlex doc pipelines; never hit by
-#     image-only OCR.
-# If a runtime ImportError surfaces post-build, drop the offender from
-# this list.
+# Excludes: kept *deliberately small*. We tried trimming aggressively
+# (matplotlib, pandas, sympy, polars, scipy.tests, …) and the bundle
+# crashed at launch with ``No module named 'sympy'`` because torch's
+# dynamo / fx tracing path imports sympy lazily. Lesson: torch's lazy
+# imports make it unsafe to drop *any* of its dep tree without a deep
+# audit.
+#
+# What is safe to drop:
+#   * modelscope: a cloud model registry. paddleocr 3.x lists it as an
+#     optional integration; the inference path never imports it.
+#   * Windows-only bits: ``winreg``, ``win32*`` - PyInstaller warns
+#     loudly otherwise even though we're macOS-only.
+# Everything else (matplotlib, pandas, sympy, scipy, pypdfium2, …) is
+# kept because at least one of {torch, ultralytics, paddleocr} pulls
+# it via a lazy import we can't statically detect.
 # ---------------------------------------------------------------------------
 EXCLUDES = [
-    "matplotlib",
-    "pandas",
-    "polars",
-    "sympy",
     "modelscope",
-    "huggingface_hub",
-    "pypdfium2", "pypdfium2_raw",
-    "typer",
-    "Crypto", "pycryptodome",
-    "pylsd",
-    "scipy.tests", "numpy.tests",
-    "torch.testing", "torch.test",
-    "torch.utils.tensorboard",
-    "torch.distributions.testing",
-    "ultralytics.engine.trainer",
-    "ultralytics.hub",
     # Windows-only stdlib bits PyInstaller would otherwise warn about
     "winreg", "win32api", "win32com", "win32gui", "win32con",
-    # Test suites everywhere
-    "tests", "test",
 ]
 
 

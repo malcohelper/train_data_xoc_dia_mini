@@ -125,7 +125,7 @@ error) are written there *and* surfaced via a Tkinter alert.
 | `ModuleNotFoundError: paddle._C` at app launch | Re-build with `rm -rf build dist` first; PyInstaller's cache occasionally drops paddle's compiled extensions when paddle is upgraded. |
 | Bundle launches, dialog appears, but `dets=0` forever | Screen Recording permission missing for the *bundle* — even if you'd granted it to Terminal previously. System Settings → Privacy & Security → Screen Recording → enable `XocDia.app`. |
 | `tkinter` dialog never shows | The bundle is using a Python without Tk linked. Use `python.org`'s installer or `brew install python-tk@3.11`, then rebuild the venv from that interpreter. |
-| `ImportError: No module named 'X'` shortly after launch | One of the heavy deps in `xocdia.spec`'s `EXCLUDES` is actually needed at runtime. Move it from `EXCLUDES` and re-build. |
+| `ImportError: No module named 'X'` shortly after launch | One of the heavy deps got dropped from the bundle. The `EXCLUDES` list in `xocdia.spec` is intentionally tiny (only `modelscope` + Windows-only bits) because torch / ultralytics / paddleocr have lazy imports that crash at runtime when their deps are missing — `sympy` was the original culprit. Don't add anything to `EXCLUDES` without testing. If the missing module isn't being collected at all, add it to `_collect()` instead. |
 | `OSError: dlopen … libpaddle.dylib` | The bundled paddle shipped without its sibling dylibs. Confirm `_collect("paddle")` is in `xocdia.spec`'s collect list and re-build with `rm -rf build dist` first. |
 
 ## Updating the bundle

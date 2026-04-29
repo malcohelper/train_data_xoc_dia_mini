@@ -107,25 +107,56 @@ PACKAGES = [
     "mss", "shapely",
 ]
 
-# Files / dirs we never want shipped. paddle's `dataset` / `tests`
-# subtrees are huge and never used at inference time; same for
-# torch's test suite. Excluding them shaves hundreds of MB and cuts
-# the modulegraph traversal that triggered the original RecursionError.
+# Files / dirs we never want shipped. PaddleOCR 3.x drags in a
+# *huge* dependency tree (modelscope, pandas, polars, sympy,
+# matplotlib, pypdfium2, …) intended for cloud serving. We only need
+# the core OCR detector + recogniser, so we exclude the heavyweights
+# and rely on PaddleOCR's lazy imports to never reach them at runtime.
+# If a runtime ImportError surfaces post-build, move the offending
+# package back from EXCLUDES to PACKAGES.
 EXCLUDES = [
     "tests", "tools",
     "tkinter.test",
-    # paddle / paddleocr internals we don't need at runtime
+
+    # ---- paddle / paddleocr internals we don't use at inference ----
     "paddle.dataset", "paddle.fluid.tests", "paddle.tests",
     "paddle.utils.cpp_extension",
     "paddleocr.tools", "paddleocr.deploy",
-    # torch test data
+
+    # ---- torch test / dev internals ----
     "torch.testing", "torch.test",
     "torch.utils.tensorboard",
-    # We only call ultralytics.YOLO; the trainer / hub / datasets
-    # graphs pull in dozens of heavy deps (matplotlib, ray, comet, …)
-    # we don't ship.
+
+    # ---- ultralytics dev/training utilities ----
     "ultralytics.engine.trainer", "ultralytics.hub",
     "ultralytics.data.scripts", "ultralytics.utils.benchmarks",
+
+    # ---- huge transitive deps PaddleOCR 3.x pulls in but our
+    #      inference path never imports. If anything breaks at
+    #      runtime, move the offender back into PACKAGES. ----
+    "modelscope",         # cloud model registry (~hundreds of MB)
+    "pypdfium2", "pypdfium2_raw",  # PDF rendering (PaddleX feature)
+    "matplotlib",         # plotting; unused at inference
+    "polars",             # dataframe; only used by some PaddleX tools
+    "pandas",             # ditto - inference path doesn't touch it
+    "sympy",              # symbolic math; used only by torch.fx
+    "scipy",              # statistics; not in the YOLO inference path
+    "huggingface_hub",    # model download from HF; we cache locally
+    "typer",              # CLI framework; only used by paddlex CLI
+    "Crypto", "pycryptodome",  # paddleocr CLI signing; unused
+    "pylsd",              # line-segment detection; doc unwarping
+    "shapely.tests",
+    "PIL.tests",
+
+    # ---- ruamel namespace package: py2app's detect_dunder_file
+    # recipe can't bootstrap the bare ``ruamel`` namespace (no
+    # __init__.py). ruamel.yaml is only used by paddlex config
+    # loaders we don't hit at inference time, so exclude entirely.
+    "ruamel", "ruamel.yaml",
+
+    # ---- Windows-only / dev-only Python stdlib bits ----
+    "_winreg", "winreg",
+    "win32api", "win32com", "win32con", "win32gui",
 ]
 
 OPTIONS = {

@@ -35,6 +35,41 @@ from setuptools import setup
 sys.setrecursionlimit(10000)
 
 
+# ---------------------------------------------------------------------------
+# Patch ``imp.find_module`` so it understands PEP 420 namespace packages.
+#
+# py2app's ``detect_dunder_file`` recipe collects every package that
+# carries a ``__file__`` reference in the modulegraph, then calls
+# ``imp.find_module(pkg)`` to locate its bootstrap. ``ruamel`` (used
+# transitively by paddleocr / paddlex) ships only as ``ruamel.yaml`` -
+# the bare ``ruamel`` namespace has no ``__init__.py``, so the legacy
+# ``imp.find_module`` raises ``ImportError`` and the whole build dies.
+#
+# The fallback below uses ``importlib`` (PEP 451) to resolve namespace
+# packages and re-shapes the result into the (file, pathname, description)
+# triple ``imp.find_module`` callers expect.
+# ---------------------------------------------------------------------------
+import imp as _imp
+import importlib.util as _ilu
+
+_original_find_module = _imp.find_module
+
+
+def _find_module_with_namespace_fallback(name, path=None):
+    try:
+        return _original_find_module(name, path)
+    except ImportError:
+        # PEP 420 namespace package handling.
+        spec = _ilu.find_spec(name) if path is None else None
+        if spec is None or spec.submodule_search_locations is None:
+            raise
+        ns_path = list(spec.submodule_search_locations)[0]
+        return (None, ns_path, ("", "", _imp.PKG_DIRECTORY))
+
+
+_imp.find_module = _find_module_with_namespace_fallback
+
+
 REPO = Path(__file__).resolve().parent
 WEIGHTS = REPO / "runs" / "detect" / "runs" / "detect" / "xocdia-2" / "weights" / "best.pt"
 

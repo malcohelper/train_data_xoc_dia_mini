@@ -2,17 +2,20 @@
 
 Exposes the helpers used by ``realtime_capture.py``:
 
-* ``list_windows()``           - enumerate visible top-level windows
-* ``get_window_bounds()``      - re-fetch bounds of a specific window
-* ``capture_window_image()``   - grab the live pixel content of a
-                                 specific window (PR #24)
-* ``pick_mode_dialog()``       - 2-button "Pick Window"/"Drag ROI"
-* ``pick_window_dialog()``     - listbox to choose one window
+* ``list_windows()``                 - enumerate visible top-level windows
+* ``get_window_bounds()``            - re-fetch bounds of a specific window
+* ``capture_window_image()``         - grab the live pixel content of a
+                                       specific window via Quartz (PR #24)
+* ``screen_capture_kit_capture()``   - same idea but via ScreenCaptureKit
+                                       (PR #25): works across Spaces and
+                                       through fullscreen transitions
+* ``pick_mode_dialog()``             - 2-button "Pick Window"/"Drag ROI"
+* ``pick_window_dialog()``           - listbox to choose one window
 
 Everything degrades gracefully on non-macOS or when ``pyobjc-framework-
-Quartz`` isn't installed: ``list_windows()`` returns ``[]`` and
-``capture_window_image()`` returns ``None`` so the caller can fall back
-to mss screen-region capture.
+Quartz`` / ``pyobjc-framework-ScreenCaptureKit`` aren't installed:
+``list_windows()`` returns ``[]`` and the capture helpers return
+``None`` so the caller can fall back through Quartz / mss.
 
 PR #23 motivation (window picker)
 ---------------------------------
@@ -21,8 +24,8 @@ own terminal, which then becomes part of the YOLO input frame and tanks
 detection rates. Picking a specific window eliminates that mistake and
 lets the script auto-follow the window when the user moves it.
 
-PR #24 motivation (window-content capture)
-------------------------------------------
+PR #24 motivation (window-content capture via Quartz)
+-----------------------------------------------------
 ``mss`` captures by *screen coordinates*. When any other window
 (including the OpenCV preview window we render ourselves) overlaps
 the game's bbox at the moment of capture, mss reads the overlay's
@@ -31,15 +34,39 @@ the preview is repainted on top of the game window, plus a recursive
 "mirror in mirror" effect when the preview *fully* covers the source.
 ``CGWindowListCreateImage`` reads the window's *backing store* directly
 via the WindowServer, so it returns the game's pixels regardless of
-occlusion, minimisation, or other windows on top.
+occlusion or other windows on top.
+
+PR #25 motivation (ScreenCaptureKit)
+------------------------------------
+``CGWindowListCreateImage`` is deprecated on macOS 14+ and, more
+importantly, it does NOT capture live frames for windows in another
+Space - in particular for *fullscreen* windows the user has switched
+away from. Symptom in the user's log: 9 rounds detected while looking
+at Safari, then ``dets=0`` for hundreds of ticks after switching to
+the terminal Space (Quartz returned a stale snapshot). ``ScreenCapture
+Kit`` (macOS 12.3+) captures the live backing store regardless of
+which Space is foreground, so the script continues to detect even
+while the user is on a different Space (e.g. reading the terminal).
+We try SCKit first, then fall back to Quartz, then to mss.
 """
 
 from __future__ import annotations
 
 import platform
+import threading
 from typing import List, NamedTuple, Optional, Tuple
 
 import numpy as np
+
+# Cached ScreenCaptureKit objects so we don't re-enumerate windows on
+# every tick. Filled lazily on first call to
+# ``screen_capture_kit_capture`` and invalidated when the window_id
+# changes or when capture starts failing.
+_SCK_CACHE: dict = {
+    "window_id": None,
+    "filter": None,
+    "config": None,
+}
 
 
 class WindowInfo(NamedTuple):
@@ -196,6 +223,212 @@ def capture_window_image(
     # Default CGImage byte order on macOS is little-endian ARGB, which
     # in memory is BGRA - so the first three channels are already BGR.
     bgr = arr[:, :width, :3].copy()  # detach from CFData backing store
+    if target_size is not None and (width, height) != target_size:
+        bgr = cv2.resize(bgr, target_size, interpolation=cv2.INTER_AREA)
+    return bgr
+
+
+def invalidate_sck_cache() -> None:
+    """Drop cached ScreenCaptureKit filter/config. Call when the user
+    picks a new window or after a stretch of capture failures so the
+    next ``screen_capture_kit_capture`` rebuilds from scratch."""
+    _SCK_CACHE["window_id"] = None
+    _SCK_CACHE["filter"] = None
+    _SCK_CACHE["config"] = None
+
+
+def _sck_get_shareable_content(timeout: float = 2.0):
+    """Call ``SCShareableContent.getShareableContentWithCompletionHandler:``
+    synchronously by waiting on a ``threading.Event``. Returns the
+    ``SCShareableContent`` instance, or ``None`` on error / timeout."""
+    try:
+        import ScreenCaptureKit  # type: ignore
+    except ImportError:
+        return None
+
+    event = threading.Event()
+    box: dict = {"content": None, "error": None}
+
+    def handler(content, error):  # noqa: ANN001 - pyobjc bridges types
+        box["content"] = content
+        box["error"] = error
+        event.set()
+
+    ScreenCaptureKit.SCShareableContent.getShareableContentWithCompletionHandler_(  # type: ignore[attr-defined]
+        handler,
+    )
+    if not event.wait(timeout):
+        return None
+    if box["error"] is not None:
+        # macOS returns NSError when permission is denied. Surface
+        # exactly once and let the caller fall back to Quartz/mss.
+        print(
+            f"[sckit] SCShareableContent error: {box['error']}. "
+            f"If this is the first run, grant Screen Recording "
+            f"permission to your terminal/Python in "
+            f"System Settings -> Privacy & Security -> Screen "
+            f"Recording, then re-run."
+        )
+        return None
+    return box["content"]
+
+
+def _sck_build_filter_and_config(
+    window_id: int, content,
+):
+    """Find the SCWindow with ``window_id`` and return
+    ``(SCContentFilter, SCStreamConfiguration)`` configured to capture
+    that window at its native (physical) resolution. Returns
+    ``(None, None)`` when the window is no longer in the shareable
+    list (closed/hidden)."""
+    try:
+        import ScreenCaptureKit  # type: ignore
+    except ImportError:
+        return None, None
+
+    target = None
+    for w in content.windows() or []:
+        try:
+            if int(w.windowID()) == int(window_id):
+                target = w
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if target is None:
+        return None, None
+
+    filter_ = (
+        ScreenCaptureKit.SCContentFilter.alloc()  # type: ignore[attr-defined]
+        .initWithDesktopIndependentWindow_(target)
+    )
+    frame = target.frame()
+    width = max(1, int(frame.size.width))
+    height = max(1, int(frame.size.height))
+
+    config = ScreenCaptureKit.SCStreamConfiguration.alloc().init()  # type: ignore[attr-defined]
+    # Capture at physical resolution (2x logical on Retina); we
+    # downscale to logical in the caller so the rest of the pipeline
+    # stays size-consistent with the mss / Quartz paths.
+    try:
+        config.setWidth_(width * 2)
+        config.setHeight_(height * 2)
+    except AttributeError:
+        # Some pyobjc versions expose properties via attribute access
+        config.width = width * 2
+        config.height = height * 2
+    try:
+        config.setShowsCursor_(False)
+    except AttributeError:
+        config.showsCursor = False
+    # ``capturesAudio`` defaults to False; ``ignoreShadowsDisplay``
+    # would clip drop-shadow framing but is a SCStream-only knob.
+    return filter_, config
+
+
+def screen_capture_kit_capture(
+    window_id: int,
+    target_size: Optional[Tuple[int, int]] = None,
+    timeout: float = 1.5,
+) -> Optional[np.ndarray]:
+    """Capture the live pixel content of a specific window via
+    ``SCScreenshotManager.captureImageWithFilter:configuration:
+    completionHandler:`` (macOS 14+).
+
+    Unlike ``capture_window_image`` (Quartz), this works for windows
+    that are:
+
+    * in another Space (e.g. fullscreen Safari while the user has
+      switched to their terminal Space),
+    * minimised to the Dock,
+    * hidden behind opaque windows.
+
+    Returns a BGR ``np.ndarray`` (compatible with ``cv2``) or ``None``
+    on any failure (non-macOS, missing pyobjc-framework-ScreenCapture
+    Kit, missing Screen Recording permission, window gone, timeout).
+    Caller should fall back to ``capture_window_image`` then mss.
+
+    ``target_size``: optional ``(width, height)`` in *logical* pixels.
+    SCKit returns the image at native (physical) resolution, which is
+    2x logical on Retina displays. Pass the window's logical bbox
+    here to get an array the same size mss would have returned.
+    """
+    if not _is_macos():
+        return None
+    try:
+        import ScreenCaptureKit  # type: ignore
+        import Quartz  # type: ignore - reused for CGImage byte unpack
+        import cv2  # type: ignore
+    except ImportError:
+        return None
+
+    # Build (and cache) the filter+config for this windowID. Cached
+    # objects are reused on subsequent ticks; we only rebuild on
+    # window-id change or invalidate_sck_cache().
+    if _SCK_CACHE["window_id"] != window_id or _SCK_CACHE["filter"] is None:
+        content = _sck_get_shareable_content(timeout=timeout)
+        if content is None:
+            return None
+        filter_, config = _sck_build_filter_and_config(window_id, content)
+        if filter_ is None or config is None:
+            return None
+        _SCK_CACHE["window_id"] = window_id
+        _SCK_CACHE["filter"] = filter_
+        _SCK_CACHE["config"] = config
+
+    filter_ = _SCK_CACHE["filter"]
+    config = _SCK_CACHE["config"]
+
+    event = threading.Event()
+    box: dict = {"image": None, "error": None}
+
+    def handler(image, error):  # noqa: ANN001 - pyobjc bridges types
+        box["image"] = image
+        box["error"] = error
+        event.set()
+
+    try:
+        ScreenCaptureKit.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(  # type: ignore[attr-defined]
+            filter_, config, handler,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Older macOS without SCScreenshotManager (12.3-13) or
+        # pyobjc that doesn't expose the symbol. Fall back.
+        print(f"[sckit] SCScreenshotManager unavailable: {exc}")
+        invalidate_sck_cache()
+        return None
+
+    if not event.wait(timeout):
+        # Capture took too long; drop cached filter so the next call
+        # re-enumerates (the window may have been closed).
+        invalidate_sck_cache()
+        return None
+
+    if box["error"] is not None:
+        # Most common: window was closed between enumeration and
+        # capture. Drop cache and let the caller fall back.
+        invalidate_sck_cache()
+        return None
+
+    cg_image = box["image"]
+    if cg_image is None:
+        invalidate_sck_cache()
+        return None
+
+    # Same CGImage -> ndarray conversion as capture_window_image.
+    width = int(Quartz.CGImageGetWidth(cg_image))  # type: ignore[attr-defined]
+    height = int(Quartz.CGImageGetHeight(cg_image))  # type: ignore[attr-defined]
+    if width <= 0 or height <= 0:
+        return None
+    bytes_per_row = int(
+        Quartz.CGImageGetBytesPerRow(cg_image)  # type: ignore[attr-defined]
+    )
+    data_provider = Quartz.CGImageGetDataProvider(cg_image)  # type: ignore[attr-defined]
+    raw = Quartz.CGDataProviderCopyData(data_provider)  # type: ignore[attr-defined]
+    buf = np.frombuffer(raw, dtype=np.uint8)
+    if buf.size < bytes_per_row * height:
+        return None
+    arr = buf[: bytes_per_row * height].reshape((height, bytes_per_row // 4, 4))
+    bgr = arr[:, :width, :3].copy()
     if target_size is not None and (width, height) != target_size:
         bgr = cv2.resize(bgr, target_size, interpolation=cv2.INTER_AREA)
     return bgr

@@ -98,9 +98,12 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 # GPU-only:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # macOS-only (window picker, see "Capture source" below):
-# pip install pyobjc-framework-Quartz
+# pip install pyobjc-framework-Quartz pyobjc-framework-ScreenCaptureKit
 # brew install python-tk@3.11   # Tk for the picker dialog (Homebrew
 #                                # Python doesn't bundle it by default)
+# After install, grant Screen Recording permission to your terminal
+# in System Settings -> Privacy & Security -> Screen Recording so
+# ScreenCaptureKit can capture live frames across macOS Spaces.
 ```
 
 ## Repo layout
@@ -293,19 +296,37 @@ script auto-follow the window when you reposition it (re-checked
 every 5 s by default, see `RealtimeCapture.window_refresh_interval`).
 
 In window-picker mode the capture pipeline reads pixels straight from
-the window's backing store via `CGWindowListCreateImage`, **not** from
-screen coordinates. That means:
+the window's backing store, **not** from screen coordinates. Three
+backends are tried in order, the first one that returns a frame wins:
 
-- the OpenCV preview window we render ourselves can sit anywhere on
+1. **`ScreenCaptureKit`** (macOS 12.3+, requires
+   `pyobjc-framework-ScreenCaptureKit`) — the modern API. Captures
+   live frames even when the target window is in another macOS Space:
+   you can run Safari fullscreen and continue using your terminal on
+   another Space, the script keeps detecting against the *live*
+   Safari content. Requires a one-time **Screen Recording**
+   permission grant in *System Settings → Privacy & Security → Screen
+   Recording* for whichever terminal/IDE launches Python.
+2. **`CGWindowListCreateImage`** (Quartz, deprecated on macOS 14+,
+   fallback for older systems). Captures the window's backing store
+   so other windows on top of the game don't contaminate the frame.
+   Limitation: returns a *stale snapshot* for windows in another
+   Space, which is why the SCKit path above is preferred.
+3. **`mss`** screen-region capture — last resort, also used for
+   drag-ROI mode. Reads whatever is rendered at the configured screen
+   coordinates, so other windows on top *will* replace the game in
+   the captured frame.
+
+Trade-offs visible to the user:
+
+- The OpenCV preview window we render ourselves can sit anywhere on
   screen (even on top of the game) without contaminating the captured
-  frame,
-- notifications, dialogs, and other apps in front of the game don't
-  cause `dets=0` ticks,
-- the game can even be on a different macOS Space and we still get
-  real frames.
-
-`mss` screen-region capture is still used for drag-ROI mode and as a
-fallback when the Quartz call fails (e.g. window closed mid-loop).
+  frame in modes 1 and 2.
+- Notifications, dialogs, and other apps in front of the game don't
+  cause `dets=0` ticks in modes 1 and 2.
+- Switching to a different Space (e.g. fullscreen Safari + a separate
+  terminal Space) only works correctly with mode 1 (SCKit). Modes 2
+  and 3 will produce stale snapshots / wrong content respectively.
 
 Auto-clamp (`--no-auto-clamp` to disable) only runs in drag-ROI mode.
 In window mode the captured region is already exactly the window
@@ -315,10 +336,12 @@ model needs as context); the `c` hotkey is also a no-op in window
 mode for the same reason.
 
 The window picker requires `pyobjc-framework-Quartz` *and* `tkinter`
-on macOS. Homebrew Python 3.11 doesn't bundle Tk - install it with
-`brew install python-tk@3.11` (or the matching version for your
-Python). On other platforms or when those packages aren't installed
-the dialog falls back to drag-ROI with a clear log message.
+on macOS. The cross-Space SCKit path additionally requires
+`pyobjc-framework-ScreenCaptureKit`. Homebrew Python 3.11 doesn't
+bundle Tk - install it with `brew install python-tk@3.11` (or the
+matching version for your Python). On other platforms or when those
+packages aren't installed the dialog falls back to drag-ROI with a
+clear log message.
 
 ### Analytics dashboard
 

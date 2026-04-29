@@ -332,12 +332,40 @@ class RealtimeCapture:
 
     # ---------- capture ----------
     def capture(self) -> Optional[np.ndarray]:
-        """Capture frame with improved error handling."""
+        """Capture a single frame.
+
+        Capture path order in window-picker mode (PR #25):
+
+        1. ``ScreenCaptureKit`` - macOS 14+, captures live frames even
+           when the target window is on another Space (e.g. fullscreen
+           Safari while the user is on the terminal Space). Requires
+           ``pyobjc-framework-ScreenCaptureKit`` and a one-time Screen
+           Recording permission grant.
+        2. ``CGWindowListCreateImage`` (Quartz) - works on older macOS
+           and when SCKit isn't installed. Limitation: returns a
+           *stale snapshot* for windows in another Space.
+        3. ``mss`` screen-region capture - last resort. Reads whatever
+           is currently rendered at ``self.monitor``'s screen
+           coordinates, so other windows on top will replace the game
+           in the captured frame.
+
+        Returns ``None`` after ``max_capture_failures`` consecutive
+        exceptions so the loop can decide what to do.
+        """
         try:
-            # In window-picker mode: pull pixels straight from the
-            # window's backing store via Quartz
             if self.window_id is not None:
                 target = (self.monitor["width"], self.monitor["height"])
+
+                # 1. ScreenCaptureKit (cross-Space, fullscreen-safe)
+                img = window_picker.screen_capture_kit_capture(
+                    self.window_id, target_size=target,
+                )
+                if img is not None:
+                    self.capture_failures = 0
+                    self.last_successful_capture = time.time()
+                    return img
+
+                # 2. Quartz CGWindowListCreateImage (same-Space only)
                 img = window_picker.capture_window_image(
                     self.window_id, target_size=target,
                 )
@@ -345,23 +373,30 @@ class RealtimeCapture:
                     self.capture_failures = 0
                     self.last_successful_capture = time.time()
                     return img
-                # Quartz call failed - fall back to mss
-                print("[capture] Quartz capture failed, falling back to mss")
-            
+
+                # Both window-aware paths failed - fall through to mss
+                print(
+                    "[capture] SCKit + Quartz both unavailable, "
+                    "falling back to mss screen-region capture"
+                )
+
             img = np.array(self.sct.grab(self.monitor))
             frame = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
             self.capture_failures = 0
             self.last_successful_capture = time.time()
             return frame
-            
+
         except Exception as exc:
             self.capture_failures += 1
-            print(f"[capture] ERROR: {exc} (failures: {self.capture_failures}/{self.max_capture_failures})")
-            
+            print(
+                f"[capture] ERROR: {exc} (failures: "
+                f"{self.capture_failures}/{self.max_capture_failures})"
+            )
+
             if self.capture_failures >= self.max_capture_failures:
                 print("[capture] Too many failures, please check ROI settings")
                 return None
-            
+
             time.sleep(0.1)
             return None
 
@@ -619,6 +654,9 @@ class RealtimeCapture:
         self.window_id = chosen.window_id
         self._window_bounds = (int(x), int(y), int(w), int(h))
         self._last_window_check = time.time()
+        # Drop any cached SCKit filter built for a previous window
+        # so the next capture rebuilds for the new windowID.
+        window_picker.invalidate_sck_cache()
         print(
             f"[window-picker] capturing '{chosen.app_name} - "
             f"{chosen.title or '(untitled)'}' "
@@ -655,6 +693,11 @@ class RealtimeCapture:
                 f"[window-picker] tracked window {kind} -> "
                 f"{w}x{h} @ ({x},{y})"
             )
+            # On resize, drop the SCKit cache so the next capture
+            # rebuilds with the new output dimensions. Pure moves
+            # don't change capture size so the cache stays valid.
+            if (w, h) != prev[2:]:
+                window_picker.invalidate_sck_cache()
 
     def select_capture_source(self, mode: str = "auto") -> bool:
         """Top-level entry-point used by ``start()`` and the ``r``
@@ -682,6 +725,7 @@ class RealtimeCapture:
             # Clear any previous window tracking
             self.window_id = None
             self._window_bounds = None
+            window_picker.invalidate_sck_cache()
             return self.select_region_with_mouse()
         # cancel / unexpected
         return False

@@ -121,6 +121,7 @@ error) are written there *and* surfaced via a Tkinter alert.
 
 | Symptom | Fix |
 |---------|-----|
+| `RecursionError: maximum recursion depth exceeded` during py2app graph walk | `setup_app.py` already calls `sys.setrecursionlimit(10000)` to handle paddle/torch's deeply nested imports. If you still hit it, bump higher and add the offending sub-package to `EXCLUDES`. |
 | `ModuleNotFoundError: paddle._C` at app launch | Re-build with `rm -rf build dist` first; py2app's incremental cache occasionally drops paddle's compiled extensions. |
 | Bundle launches, dialog appears, but `dets=0` forever | Screen Recording permission missing for the *bundle* — even if you'd granted it to Terminal previously. System Settings → Privacy & Security → Screen Recording → enable `XocDia.app`. |
 | `tkinter` dialog never shows | The bundle is using a Python without Tk linked. Use `python.org`'s installer or `brew install python-tk@3.11`, then rebuild the venv from that interpreter. |

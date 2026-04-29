@@ -27,6 +27,13 @@ from pathlib import Path
 
 from setuptools import setup
 
+# py2app's modulegraph recurses through every imported sub-package.
+# Walking paddle / paddleocr / torch with the default 1000-frame limit
+# blows the stack on Python 3.11 + recent paddle. 10000 is overkill
+# for safety; modulegraph itself rarely exceeds ~3000 frames in our
+# tests but the headroom is free.
+sys.setrecursionlimit(10000)
+
 
 REPO = Path(__file__).resolve().parent
 WEIGHTS = REPO / "runs" / "detect" / "runs" / "detect" / "xocdia-2" / "weights" / "best.pt"
@@ -74,41 +81,51 @@ PLIST = {
     ),
 }
 
-# Frameworks py2app sometimes misses. Ultralytics imports torch lazily,
-# PaddleOCR is huge but only loads when OCR is needed - both are still
-# pulled in by the recipe walker once we declare them.
+# Only declare top-level modules we know py2app needs to *graph*.
+# Heavy 3rd-party (paddle/torch/ultralytics) are listed in PACKAGES so
+# they get copied wholesale without modulegraph walking every submodule.
+# Doing both (includes + packages) is what blows the recursion limit.
 INCLUDES = [
     # Our modules
     "realtime_capture", "pipeline", "detector", "ocr_engine",
     "ocr_postprocess", "cell_preprocessor", "classes", "window_picker",
-    # 3rd-party that py2app's modulegraph occasionally misses for
-    # ultralytics / paddle stacks. Listed defensively so the bundle
-    # doesn't ship missing-import dialogs.
+    # Lightweight 3rd-party imports our code touches directly.
     "cv2", "numpy", "PIL", "yaml", "tqdm",
     "tkinter", "tkinter.filedialog", "tkinter.messagebox",
-    "Quartz", "ScreenCaptureKit", "AppKit", "Foundation",
-    "objc",
+    # pyobjc submodules. Listing the framework packages here (instead
+    # of in PACKAGES) keeps modulegraph from descending into the
+    # generated .pyi stubs.
+    "Quartz", "ScreenCaptureKit", "AppKit", "Foundation", "objc",
 ]
 
-# Heavy / problem packages we want py2app to copy as packages instead
-# of trying to graph their internals. This keeps build times reasonable
-# and avoids "submodule X not found" warnings.
+# Heavy / circularly-imported packages. ``packages`` tells py2app to
+# *copy the directory verbatim* without doing import-graph analysis,
+# which is what saves us from RecursionError on paddle/torch.
 PACKAGES = [
     "ultralytics", "torch", "torchvision",
     "paddle", "paddleocr", "paddlex",
     "mss", "shapely",
-    # ``ScreenCaptureKit`` / ``Quartz`` / etc. are pyobjc framework
-    # packages - listing them here prevents py2app from trying to
-    # bytecode-compile their generated .pyi stubs.
-    "objc",
 ]
 
-# Files / dirs we never want shipped: training datasets, dev caches,
-# user round dumps, etc. Not strictly necessary (modulegraph won't
-# pick them up) but listing them docs intent.
+# Files / dirs we never want shipped. paddle's `dataset` / `tests`
+# subtrees are huge and never used at inference time; same for
+# torch's test suite. Excluding them shaves hundreds of MB and cuts
+# the modulegraph traversal that triggered the original RecursionError.
 EXCLUDES = [
     "tests", "tools",
     "tkinter.test",
+    # paddle / paddleocr internals we don't need at runtime
+    "paddle.dataset", "paddle.fluid.tests", "paddle.tests",
+    "paddle.utils.cpp_extension",
+    "paddleocr.tools", "paddleocr.deploy",
+    # torch test data
+    "torch.testing", "torch.test",
+    "torch.utils.tensorboard",
+    # We only call ultralytics.YOLO; the trainer / hub / datasets
+    # graphs pull in dozens of heavy deps (matplotlib, ray, comet, …)
+    # we don't ship.
+    "ultralytics.engine.trainer", "ultralytics.hub",
+    "ultralytics.data.scripts", "ultralytics.utils.benchmarks",
 ]
 
 OPTIONS = {

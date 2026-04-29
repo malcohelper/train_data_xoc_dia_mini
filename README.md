@@ -362,6 +362,24 @@ The time-range filter defaults to `[first round, latest round]` and
 follows new rounds automatically. Click `AUTO` (or edit either date)
 to pin a historical window; click again to re-enable follow.
 
+## Packaging as `XocDia.app` (macOS bundle)
+
+To ship a double-clickable `.app` to friends who don't want to manage
+a Python venv, run on macOS:
+
+```bash
+./build_app.sh                                      # produces dist/XocDia.app + dist/XocDia.zip
+```
+
+See [`BUILD.md`](BUILD.md) for prerequisites, troubleshooting, and how
+to point at a non-default `best.pt`. End-user docs (Gatekeeper bypass,
+Screen Recording permission, daily usage) live in
+[`USER_GUIDE.md`](USER_GUIDE.md) and ship inside the bundle.
+
+The bundle is unsigned; recipients right-click → Open the first time,
+grant Screen Recording permission, then double-click as normal. Apple
+Silicon only (no Intel Mac support).
+
 ## Dataset sizing
 
 - Minimum workable: ~80–100 labeled frames covering all phases (betting,

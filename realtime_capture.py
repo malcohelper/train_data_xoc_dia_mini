@@ -277,6 +277,7 @@ class RealtimeCapture:
         preview_fps: float = 10.0,
         diag: bool = False,
         stabilize_frames: int = 3,  # NEW: number of frames to buffer for stability
+        rounds_dir: Optional[Path] = None,
     ):
         resolved = resolve_weights(weights)
         print(f"Model weights: {resolved}")
@@ -293,7 +294,12 @@ class RealtimeCapture:
 
         self.monitor = {"top": 0, "left": 0, "width": 1280, "height": 800}
         self.preview_window = "XocDia Preview"
-        self.tracker = RoundTracker(Path("rounds"))
+        # ``rounds_dir`` is overridable so the .app bundle can write to
+        # ``~/Documents/XocDia/rounds`` instead of the bundle's CWD
+        # (which is read-only). Defaults to ./rounds for repo dev.
+        rd_path = rounds_dir if rounds_dir is not None else Path("rounds")
+        print(f"Rounds output: {rd_path.resolve()}")
+        self.tracker = RoundTracker(rd_path)
         self.last_state: Optional[GameState] = None
         self.last_frame: Optional[np.ndarray] = None
         self.running = True
@@ -1046,11 +1052,18 @@ def _parse_args():
                        help="Capture mode: auto (dialog), window (picker), or roi (drag)")
     parser.add_argument("--stabilize-frames", type=int, default=3,
                        help="Number of frames to buffer for detection stability (default: 3)")
+    parser.add_argument("--rounds-dir", default=None,
+                       help="Output directory for round JSON files "
+                            "(default: ./rounds in repo, ~/Documents/XocDia/rounds in .app)")
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main() -> int:
+    """Programmatic entry point. Returns process exit code so ``app_main``
+    can wrap this with extra setup (logging, default paths) without
+    duplicating the CLI plumbing."""
     args = _parse_args()
+    rounds_dir = Path(args.rounds_dir) if args.rounds_dir else None
     cap = RealtimeCapture(
         weights=args.weights, conf=args.conf, imgsz=args.imgsz, device=args.device,
         log_ocr_rejects=args.log_ocr_rejects,
@@ -1058,6 +1071,7 @@ if __name__ == "__main__":
         preview_fps=args.preview_fps,
         diag=args.diag,
         stabilize_frames=args.stabilize_frames,
+        rounds_dir=rounds_dir,
     )
     cap.start(
         interval=args.interval,
@@ -1066,3 +1080,8 @@ if __name__ == "__main__":
         auto_clamp=not args.no_auto_clamp,
         capture_mode=args.capture_mode,
     )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

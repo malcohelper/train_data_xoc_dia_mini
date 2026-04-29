@@ -124,10 +124,13 @@ HIDDEN_IMPORTS = list(set(
 # it via a lazy import we can't statically detect.
 # ---------------------------------------------------------------------------
 EXCLUDES = [
-    "modelscope",
     # Windows-only stdlib bits PyInstaller would otherwise warn about
     "winreg", "win32api", "win32com", "win32gui", "win32con",
 ]
+# NB: ``modelscope`` is *required* at module-import time by
+# paddlex.inference.utils.official_models (it does a top-level
+# ``import modelscope``), so we cannot exclude it. Likewise sympy /
+# matplotlib / pandas - tested empirically.
 
 
 # ---------------------------------------------------------------------------

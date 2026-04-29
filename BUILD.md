@@ -35,8 +35,8 @@ Compressed zip: ~300 – 500 MB.
 ## Prerequisites
 
 1. **macOS 12.3+** (ScreenCaptureKit lives there).
-2. **Python 3.11** (3.12 works in our testing too, but py2app + paddle
-   are most-tested on 3.11). Run inside the project virtualenv:
+2. **Python 3.11** (3.12 works in our testing too, but PyInstaller +
+   paddle are most-tested on 3.11). Run inside the project virtualenv:
 
    ```bash
    source venv/bin/activate
@@ -44,7 +44,7 @@ Compressed zip: ~300 – 500 MB.
 
 3. **All runtime deps already installed in that venv.** The build
    script verifies this by attempting `import cv2, ultralytics, paddle,
-   paddleocr, ScreenCaptureKit, …` before invoking py2app — if any
+   paddleocr, ScreenCaptureKit, …` before invoking PyInstaller — if any
    import fails it aborts with a clear message.
 
 4. **A trained `best.pt`** at the default location:
@@ -67,10 +67,10 @@ From the repo root:
 That's it. The script:
 
 1. Validates platform / venv / required imports.
-2. Installs `py2app` if missing.
-3. Removes any previous `build/` and `dist/` (caches cause stale-import
-   bugs roughly 1 in 5 builds).
-4. Runs `python setup_app.py py2app`.
+2. Installs `pyinstaller` + `pyinstaller-hooks-contrib` if missing.
+3. Removes any previous `build/` and `dist/` (PyInstaller caches
+   sometimes pick up stale `.dylib`s after a `pip install --upgrade`).
+4. Runs `python -m PyInstaller --clean --noconfirm xocdia.spec`.
 5. Compresses the bundle to `dist/XocDia.zip` via `ditto`.
 
 Build time: 5 – 15 minutes on Apple Silicon depending on which deps
@@ -108,9 +108,9 @@ error) are written there *and* surfaced via a Tkinter alert.
   account ($99/year) and a `codesign` + `xcrun notarytool submit`
   step. Not in scope for this build.
 
-* **Architecture.** py2app builds for the architecture you build on.
-  Building on Apple Silicon → `arm64`-only bundle that won't run on
-  Intel Macs. To support both you'd need a universal2 Python install
+* **Architecture.** PyInstaller builds for the architecture you build
+  on. Building on Apple Silicon → `arm64`-only bundle that won't run
+  on Intel Macs. To support both you'd need a universal2 Python install
   + universal wheels for every dep, which paddleocr in particular
   doesn't ship.
 
@@ -121,11 +121,12 @@ error) are written there *and* surfaced via a Tkinter alert.
 
 | Symptom | Fix |
 |---------|-----|
-| `RecursionError: maximum recursion depth exceeded` during py2app graph walk | `setup_app.py` already calls `sys.setrecursionlimit(10000)` to handle paddle/torch's deeply nested imports. If you still hit it, bump higher and add the offending sub-package to `EXCLUDES`. |
-| `ModuleNotFoundError: paddle._C` at app launch | Re-build with `rm -rf build dist` first; py2app's incremental cache occasionally drops paddle's compiled extensions. |
+| `RuntimeError: operator torchvision::nms does not exist` at launch | This was the symptom that killed our py2app attempt. PyInstaller's `collect_all('torch'/'torchvision')` ships the compiled ops correctly. If it returns: ensure `pyinstaller-hooks-contrib` is installed and `torchvision` is in `xocdia.spec`'s `_collect()` list. |
+| `ModuleNotFoundError: paddle._C` at app launch | Re-build with `rm -rf build dist` first; PyInstaller's cache occasionally drops paddle's compiled extensions when paddle is upgraded. |
 | Bundle launches, dialog appears, but `dets=0` forever | Screen Recording permission missing for the *bundle* — even if you'd granted it to Terminal previously. System Settings → Privacy & Security → Screen Recording → enable `XocDia.app`. |
 | `tkinter` dialog never shows | The bundle is using a Python without Tk linked. Use `python.org`'s installer or `brew install python-tk@3.11`, then rebuild the venv from that interpreter. |
-| `OSError: dlopen … libpaddle.dylib` | The bundled paddle shipped without its sibling dylibs. Add `paddle` to `PACKAGES` in `setup_app.py` if you've removed it. |
+| `ImportError: No module named 'X'` shortly after launch | One of the heavy deps in `xocdia.spec`'s `EXCLUDES` is actually needed at runtime. Move it from `EXCLUDES` and re-build. |
+| `OSError: dlopen … libpaddle.dylib` | The bundled paddle shipped without its sibling dylibs. Confirm `_collect("paddle")` is in `xocdia.spec`'s collect list and re-build with `rm -rf build dist` first. |
 
 ## Updating the bundle
 
@@ -136,6 +137,6 @@ Whenever `realtime_capture.py`, `pipeline.py`, or `best.pt` changes:
 2. `./build_app.sh`
 3. Re-share `dist/XocDia.zip`.
 
-Bundle version is set in `setup_app.py` (`CFBundleShortVersionString`);
+Bundle version is set in `xocdia.spec` (`CFBundleShortVersionString`);
 bump it before each new release so users can tell which they have via
 About panel.

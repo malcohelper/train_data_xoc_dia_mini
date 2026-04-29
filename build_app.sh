@@ -16,7 +16,7 @@
 #   * dist/XocDia.zip                 – ditto-compressed bundle for sharing
 #
 # The build is intentionally "from scratch" each time; partial caches
-# under build/ have caused stale-import bugs in prior py2app revs.
+# under build/ have caused stale-import bugs in our experience.
 
 set -euo pipefail
 
@@ -31,17 +31,17 @@ fi
 
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
   echo "WARN: no virtualenv detected. Activate the project venv first," >&2
-  echo "      otherwise py2app may bundle the system Python and fail." >&2
+  echo "      otherwise PyInstaller may bundle the system Python and fail." >&2
 fi
 
-if ! python -c "import py2app" >/dev/null 2>&1; then
-  echo "Installing py2app into the active environment..."
-  python -m pip install --upgrade py2app
+if ! python -c "import PyInstaller" >/dev/null 2>&1; then
+  echo "Installing PyInstaller + hooks-contrib into the active environment..."
+  python -m pip install --upgrade pyinstaller pyinstaller-hooks-contrib
 fi
 
-# Sanity-check the critical runtime imports before py2app tries to walk
-# them. A missing import here is the #1 cause of "build succeeded but
-# bundle crashes on launch" reports.
+# Sanity-check the critical runtime imports before PyInstaller tries to
+# walk them. A missing import here is the #1 cause of "build succeeded
+# but bundle crashes on launch" reports.
 python - <<'PY'
 import importlib, sys
 required = [
@@ -67,15 +67,26 @@ PY
 echo "Cleaning previous build/ and dist/..."
 rm -rf build dist
 
-# --- py2app ------------------------------------------------------------------
+# --- pyinstaller -------------------------------------------------------------
 
-echo "Building XocDia.app via py2app (this can take 5-15 minutes)..."
-python setup_app.py py2app
+# PyInstaller's default ``--workpath`` is ``./build`` and ``--distpath``
+# is ``./dist``, matching the expectations of the rest of this script.
+# ``--clean`` flushes the cache (separate from the rm -rf above which
+# removes our outputs; --clean removes PyInstaller's internal cache).
+echo "Building XocDia.app via PyInstaller (this can take 5-15 minutes)..."
+python -m PyInstaller --clean --noconfirm xocdia.spec
 
 if [[ ! -d dist/XocDia.app ]]; then
   echo "ERROR: build finished without producing dist/XocDia.app" >&2
+  echo "       (PyInstaller's COLLECT step also produces dist/XocDia/" >&2
+  echo "       as a folder bundle - that's not what we ship.)" >&2
   exit 2
 fi
+
+# Drop the side-by-side ``dist/XocDia/`` folder PyInstaller emits next
+# to the .app - it's the same content as inside the .app and just
+# bloats the zip.
+rm -rf dist/XocDia
 
 # --- post-build: zip for distribution ----------------------------------------
 

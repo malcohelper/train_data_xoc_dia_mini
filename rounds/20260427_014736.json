@@ -1,0 +1,40 @@
+{
+  "round_id": "20260427_014736",
+  "started_at": "2026-04-27T01:47:36",
+  "finalised_at": "2026-04-27T01:48:25",
+  "dice_result": "3w_1r",
+  "percent": {
+    "3w_1r": "25M",
+    "le": "53%",
+    "3r_1w": "160h",
+    "4_white": "1/0",
+    "4_red": "06",
+    "chan": "47%"
+  },
+  "bets": {
+    "chan": {
+      "total_bet": "5.52M",
+      "total_count": "96"
+    },
+    "le": {
+      "total_bet": "5.76N",
+      "total_count": "621"
+    },
+    "4_red": {
+      "total_bet": "2.09M",
+      "total_count": "84"
+    },
+    "3w_1r": {
+      "total_bet": "5.72M",
+      "total_count": "76"
+    },
+    "3r_1w": {
+      "total_bet": "1.8M",
+      "total_count": "S1"
+    },
+    "4_white": {
+      "total_bet": "W26'L",
+      "total_count": "71"
+    }
+  }
+}

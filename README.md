@@ -97,6 +97,10 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 # GPU-only:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# macOS-only (window picker, see "Capture source" below):
+# pip install pyobjc-framework-Quartz
+# brew install python-tk@3.11   # Tk for the picker dialog (Homebrew
+#                                # Python doesn't bundle it by default)
 ```
 
 ## Repo layout
@@ -120,6 +124,11 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 │   ├── images/{raw,train,val}
 │   └── labels/{raw,train,val}
 ├── rounds/                   # per-round PNG + JSON snapshots
+├── analytics/
+│   ├── serve.py              # `python -m analytics.serve` - static HTML +
+│   │                         #   /api/rounds.json endpoint
+│   ├── index.html            # dashboard (Tailwind CDN)
+│   └── app.js                # Chẵn/Lẻ + vị stats + Big Road renderer
 └── tools/
     ├── rounds_to_dataset.py          # copy rounds/*.png into dataset/images/raw/
     ├── migrate_labels_15class.py     # one-shot: 17-class -> 15-class label remap
@@ -251,15 +260,84 @@ python pipeline.py --weights runs/detect/xocdia/weights/best.pt \
 # Detector only (no OCR / no state inference)
 python detector.py --weights runs/detect/xocdia/weights/best.pt --source frame.png
 
-# Real-time screen capture + analyze (full-screen ROI flow)
+# Real-time screen capture + analyze
 python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
-# Press `r` in the preview to drag-select the game region, `q` to quit.
+# A small dialog pops immediately with two buttons:
+#   * "Pick Window" - lists the macOS app windows currently visible
+#     (Quartz/`pyobjc-framework-Quartz`); pick e.g. "Safari - XocDia"
+#     and the script captures exactly that window's bbox and follows
+#     it when you move/resize the window.
+#   * "Drag ROI"    - the original drag-rectangle flow on full screen.
+# Right after either choice we run a single high-resolution YOLO pass
+# and tighten the capture region to the detected UI bbox, so the loop
+# runs at the default imgsz without losing detail. Press `r` later in
+# the preview to re-pick (mirrors the startup flow), `c` to re-tighten
+# without re-picking, `q` to quit. Pass `--capture-mode window|roi` to
+# skip the dialog, `--no-auto-roi` to skip the picker entirely, or
+# `--no-auto-clamp` to skip the auto-tighten pass.
 ```
 
 Tune CPU usage on slow machines via `--preview-fps` (default 10;
 detection still runs on its own `--interval`, default 1s). Pass
 `--diag` to print one diagnostic line per detection tick (phase,
 timer, dice, det count, monitor bounds) when troubleshooting.
+
+#### Picking a window vs dragging a ROI
+
+The original "drag a rectangle" flow makes it very easy to drag past
+the game window into your terminal or another app, which then becomes
+part of the YOLO input frame and tanks detection rates because the
+game ends up squeezed in the smaller fraction of the captured pixels.
+Picking a window via Quartz sidesteps that entirely and also lets the
+script auto-follow the window when you reposition it (re-checked
+every 5 s by default, see `RealtimeCapture.window_refresh_interval`).
+
+In window-picker mode the capture pipeline reads pixels straight from
+the window's backing store via `CGWindowListCreateImage`, **not** from
+screen coordinates. That means:
+
+- the OpenCV preview window we render ourselves can sit anywhere on
+  screen (even on top of the game) without contaminating the captured
+  frame,
+- notifications, dialogs, and other apps in front of the game don't
+  cause `dets=0` ticks,
+- the game can even be on a different macOS Space and we still get
+  real frames.
+
+`mss` screen-region capture is still used for drag-ROI mode and as a
+fallback when the Quartz call fails (e.g. window closed mid-loop).
+
+Auto-clamp (`--no-auto-clamp` to disable) only runs in drag-ROI mode.
+In window mode the captured region is already exactly the window
+content and the 1-shot YOLO clamp pass tends to trim into a partial
+UI fragment (e.g. just the betting cells, missing the scoreboard the
+model needs as context); the `c` hotkey is also a no-op in window
+mode for the same reason.
+
+The window picker requires `pyobjc-framework-Quartz` *and* `tkinter`
+on macOS. Homebrew Python 3.11 doesn't bundle Tk - install it with
+`brew install python-tk@3.11` (or the matching version for your
+Python). On other platforms or when those packages aren't installed
+the dialog falls back to drag-ROI with a clear log message.
+
+### Analytics dashboard
+
+`analytics/` is a small static page that reads the `rounds/*.json`
+dumps written by `realtime_capture.py` and renders a Chẵn/Lẻ
+progress card, per-dice-combo (4-trắng / 3T1Đ / 2T2Đ / 3Đ1T / 4-đỏ)
+stats, and a Baccarat-style 6-row Big Road. It polls `/api/rounds.json`
+every 3 seconds so a live capture session updates the dashboard in
+the browser without a reload.
+
+```bash
+# From the repo root, with realtime_capture.py writing to ./rounds
+python -m analytics.serve                          # http://127.0.0.1:8000
+python -m analytics.serve --rounds-dir ~/captures/rounds --port 8080
+```
+
+The time-range filter defaults to `[first round, latest round]` and
+follows new rounds automatically. Click `AUTO` (or edit either date)
+to pin a historical window; click again to re-enable follow.
 
 ## Dataset sizing
 

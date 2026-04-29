@@ -1,30 +1,45 @@
-"""macOS window enumeration + Tkinter dialogs for capture-source selection.
+"""macOS window enumeration + Tkinter dialogs + window-content capture.
 
-Exposes three small helpers used by ``realtime_capture.py``:
+Exposes the helpers used by ``realtime_capture.py``:
 
-* ``list_windows()``       - enumerate visible top-level windows (Quartz)
-* ``get_window_bounds()``  - re-fetch bounds of a specific window by id
-* ``pick_mode_dialog()``   - 2-button "Pick Window" / "Drag ROI" picker
-* ``pick_window_dialog()`` - listbox to choose one window
+* ``list_windows()``           - enumerate visible top-level windows
+* ``get_window_bounds()``      - re-fetch bounds of a specific window
+* ``capture_window_image()``   - grab the live pixel content of a
+                                 specific window (PR #24)
+* ``pick_mode_dialog()``       - 2-button "Pick Window"/"Drag ROI"
+* ``pick_window_dialog()``     - listbox to choose one window
 
 Everything degrades gracefully on non-macOS or when ``pyobjc-framework-
-Quartz`` isn't installed: ``list_windows()`` returns ``[]`` and the
-caller falls back to the existing drag-ROI flow.
+Quartz`` isn't installed: ``list_windows()`` returns ``[]`` and
+``capture_window_image()`` returns ``None`` so the caller can fall back
+to mss screen-region capture.
 
-PR #23 motivation
------------------
+PR #23 motivation (window picker)
+---------------------------------
 Drag-ROI lets users accidentally drag past the game window into their
 own terminal, which then becomes part of the YOLO input frame and tanks
-detection rates. Picking a specific window (Safari, Chrome, the
-standalone game player, etc.) eliminates that whole class of mistake
-and lets the script auto-follow the window when the user moves or
-resizes it.
+detection rates. Picking a specific window eliminates that mistake and
+lets the script auto-follow the window when the user moves it.
+
+PR #24 motivation (window-content capture)
+------------------------------------------
+``mss`` captures by *screen coordinates*. When any other window
+(including the OpenCV preview window we render ourselves) overlaps
+the game's bbox at the moment of capture, mss reads the overlay's
+pixels instead of the game's. Symptom: ``dets=0`` ticks every time
+the preview is repainted on top of the game window, plus a recursive
+"mirror in mirror" effect when the preview *fully* covers the source.
+``CGWindowListCreateImage`` reads the window's *backing store* directly
+via the WindowServer, so it returns the game's pixels regardless of
+occlusion, minimisation, or other windows on top.
 """
 
 from __future__ import annotations
 
 import platform
 from typing import List, NamedTuple, Optional, Tuple
+
+import numpy as np
 
 
 class WindowInfo(NamedTuple):
@@ -118,12 +133,85 @@ def get_window_bounds(window_id: int) -> Optional[Tuple[int, int, int, int]]:
         return None
 
 
+def capture_window_image(
+    window_id: int,
+    target_size: Optional[Tuple[int, int]] = None,
+) -> Optional[np.ndarray]:
+    """Capture the live pixel content of a specific window via Quartz.
+
+    Returns a BGR ``np.ndarray`` (compatible with ``cv2``) or ``None``
+    when the window is gone, Quartz isn't installed, or we're not on
+    macOS. Unlike mss screen-region capture, this reads the window's
+    backing store directly through the WindowServer, so the result is
+    correct regardless of:
+
+    * other windows being on top of the target,
+    * the target being minimised / on a different Space,
+    * the OpenCV preview we render ourselves overlapping the game.
+
+    ``target_size``: optional ``(width, height)`` in *logical* pixels.
+    Quartz returns the image at native (physical) resolution, which is
+    2x logical on Retina displays. Pass the window's logical bbox here
+    to get an array the same size mss would have returned, so
+    downstream coordinates stay consistent.
+    """
+    if not _is_macos():
+        return None
+    try:
+        import Quartz  # type: ignore
+        import cv2  # type: ignore
+    except ImportError:
+        return None
+
+    try:
+        cg_image = Quartz.CGWindowListCreateImage(  # type: ignore[attr-defined]
+            Quartz.CGRectNull,  # type: ignore[attr-defined]
+            Quartz.kCGWindowListOptionIncludingWindow,  # type: ignore[attr-defined]
+            window_id,
+            Quartz.kCGWindowImageBoundsIgnoreFraming  # type: ignore[attr-defined]
+            | Quartz.kCGWindowImageBestResolution,  # type: ignore[attr-defined]
+        )
+    except Exception:  # noqa: BLE001 - surface as None, caller falls back
+        return None
+    if cg_image is None:
+        return None
+
+    width = int(Quartz.CGImageGetWidth(cg_image))  # type: ignore[attr-defined]
+    height = int(Quartz.CGImageGetHeight(cg_image))  # type: ignore[attr-defined]
+    if width <= 0 or height <= 0:
+        return None
+    bytes_per_row = int(
+        Quartz.CGImageGetBytesPerRow(cg_image)  # type: ignore[attr-defined]
+    )
+    data_provider = Quartz.CGImageGetDataProvider(cg_image)  # type: ignore[attr-defined]
+    raw = Quartz.CGDataProviderCopyData(data_provider)  # type: ignore[attr-defined]
+    # ``CFData`` exposes a buffer protocol via pyobjc; ``np.frombuffer``
+    # works directly. Each row is ``bytes_per_row`` long which may be
+    # > width*4 due to alignment padding, so reshape with the row stride
+    # and slice off the first ``width`` columns.
+    buf = np.frombuffer(raw, dtype=np.uint8)
+    if buf.size < bytes_per_row * height:
+        return None
+    arr = buf[: bytes_per_row * height].reshape((height, bytes_per_row // 4, 4))
+    # Default CGImage byte order on macOS is little-endian ARGB, which
+    # in memory is BGRA - so the first three channels are already BGR.
+    bgr = arr[:, :width, :3].copy()  # detach from CFData backing store
+    if target_size is not None and (width, height) != target_size:
+        bgr = cv2.resize(bgr, target_size, interpolation=cv2.INTER_AREA)
+    return bgr
+
+
 def pick_mode_dialog() -> str:
     """Pop a tiny 2-button window asking how to select the capture
     region. Returns ``"window"``, ``"roi"``, or ``"cancel"``."""
     try:
         import tkinter as tk
     except ImportError:
+        print(
+            "[window-picker] tkinter not available - falling back to "
+            "drag-ROI. Install with `brew install python-tk@3.11` (or "
+            "the matching version for your Python) to get the picker."
+        )
         return "roi"
 
     result = {"choice": "cancel"}
@@ -171,6 +259,10 @@ def pick_window_dialog(windows: List[WindowInfo]) -> Optional[WindowInfo]:
     try:
         import tkinter as tk
     except ImportError:
+        print(
+            "[window-picker] tkinter not available - cannot show window "
+            "list. Install with `brew install python-tk@3.11`."
+        )
         return None
 
     chosen: dict[str, Optional[WindowInfo]] = {"win": None}

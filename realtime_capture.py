@@ -35,7 +35,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import mss
@@ -303,9 +303,30 @@ class RealtimeCapture:
         self.window_id: Optional[int] = None
         self.window_refresh_interval: float = 5.0
         self._last_window_check: float = 0.0
+        # Last known *outer* window bounds in screen coords. Used by
+        # ``_refresh_window_bounds`` so we can distinguish "user moved
+        # the window" (just translate ``self.monitor``) from "user
+        # resized the window" (reset and re-clamp).
+        self._window_bounds: Optional[Tuple[int, int, int, int]] = None
 
     # ---------- capture ----------
     def capture(self) -> np.ndarray:
+        # In window-picker mode (PR #24): pull pixels straight from the
+        # window's backing store via Quartz so we ignore other windows
+        # (preview overlay, dialogs, notifications) that may be sitting
+        # on top of the game on screen. mss reads *screen* coordinates
+        # so anything overlapping the bbox would replace the game in
+        # the captured frame and tank detections.
+        if self.window_id is not None:
+            target = (self.monitor["width"], self.monitor["height"])
+            img = window_picker.capture_window_image(
+                self.window_id, target_size=target,
+            )
+            if img is not None:
+                return img
+            # Quartz call failed (window closed, missing pyobjc). Fall
+            # back to mss so the loop keeps running; the user will see
+            # a possibly-occluded frame but at least no exceptions.
         img = np.array(self.sct.grab(self.monitor))
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
@@ -347,6 +368,7 @@ class RealtimeCapture:
         attempt_gap_s: float = 0.3,
         warmup_s: float = 0.5,
         clamp_conf: float = 0.20,
+        min_area_ratio: float = 0.5,
     ) -> bool:
         """Run a high-resolution YOLO pass on the current ROI and
         tighten ``self.monitor`` to the union of all detections.
@@ -449,6 +471,24 @@ class RealtimeCapture:
             print("[auto-clamp] degenerate bbox; keeping ROI.")
             return False
 
+        # Safety: a partial detection set (e.g. only the betting cells
+        # without the scoreboard above) yields a bbox that excludes
+        # parts of the UI the model needs as context. If the proposed
+        # bbox is far smaller than the source, prefer keeping the
+        # source rather than tightening into a fragment that future
+        # ticks won't be able to expand from.
+        old_area = float(self.monitor["width"]) * float(self.monitor["height"])
+        new_area = float(new_w) * float(new_h)
+        if old_area > 0 and (new_area / old_area) < min_area_ratio:
+            print(
+                f"[auto-clamp] proposed bbox ({new_w}x{new_h}) is "
+                f"{(new_area / old_area) * 100:.0f}% of source "
+                f"({self.monitor['width']}x{self.monitor['height']}, "
+                f"min {int(min_area_ratio * 100)}%); keeping ROI as-is. "
+                f"Detections probably covered only part of the UI."
+            )
+            return False
+
         before = dict(self.monitor)
         self.monitor = {
             "top": int(self.monitor["top"] + y1),
@@ -491,6 +531,7 @@ class RealtimeCapture:
             "width": int(w), "height": int(h),
         }
         self.window_id = chosen.window_id
+        self._window_bounds = (int(x), int(y), int(w), int(h))
         self._last_window_check = time.time()
         print(
             f"[window-picker] capturing '{chosen.app_name} - "
@@ -501,8 +542,22 @@ class RealtimeCapture:
 
     def _refresh_window_bounds(self) -> None:
         """If we are tracking a specific window, re-fetch its bbox and
-        update ``self.monitor`` when it has moved/resized. No-op when
-        ``self.window_id`` is ``None`` or Quartz isn't available."""
+        update ``self.monitor`` to follow it. No-op when
+        ``self.window_id`` is ``None`` or Quartz isn't available.
+
+        In window mode the captured frame is read by ``window_id`` via
+        Quartz (see ``capture()``), so ``monitor.left/top`` are not
+        actually used by the capture call - but we still keep the
+        monitor synced with the window's bbox because:
+
+        * the preview overlay shows ``Region left/top/w/h``,
+        * the ``mss`` fallback path (Quartz call failed) still reads
+          screen coords,
+        * ``monitor.width/height`` is the ``target_size`` passed to
+          Quartz so the returned image is downscaled from physical
+          (Retina) to logical pixels - if the window is resized we
+          must update those numbers.
+        """
         if self.window_id is None:
             return
         bounds = window_picker.get_window_bounds(self.window_id)
@@ -515,21 +570,20 @@ class RealtimeCapture:
             self.window_id = None
             return
         x, y, w, h = bounds
-        if (
-            x == self.monitor["left"]
-            and y == self.monitor["top"]
-            and w == self.monitor["width"]
-            and h == self.monitor["height"]
-        ):
+        prev = self._window_bounds
+        self._window_bounds = (int(x), int(y), int(w), int(h))
+        if prev is not None and (x, y, w, h) == prev:
             return
         self.monitor = {
             "top": int(y), "left": int(x),
             "width": int(w), "height": int(h),
         }
-        print(
-            f"[window-picker] tracked window moved/resized -> "
-            f"{w}x{h} @ ({x},{y})"
-        )
+        if prev is not None:
+            kind = "resized" if (w, h) != prev[2:] else "moved"
+            print(
+                f"[window-picker] tracked window {kind} -> "
+                f"{w}x{h} @ ({x},{y})"
+            )
 
     def select_capture_source(self, mode: str = "auto") -> bool:
         """Top-level entry-point used by ``start()`` and the ``r``
@@ -558,6 +612,7 @@ class RealtimeCapture:
             # Clear any previous window tracking when the user
             # explicitly switches back to drag-ROI.
             self.window_id = None
+            self._window_bounds = None
             return self.select_region_with_mouse()
         # cancel / unexpected
         return False
@@ -572,20 +627,31 @@ class RealtimeCapture:
         capture_mode: str = "auto",
     ) -> None:
         roi_set = False
-        if auto_roi and show_preview:
-            # Pop the capture-source picker immediately on start so the
-            # user can choose between Pick Window / Drag ROI before
-            # detection begins. The default ``self.monitor``
-            # (1280x800@(0,0)) almost never matches the user's actual
-            # game window, so without this prompt detection silently
-            # produces ``dets=0`` until the user remembers to press
-            # ``r``.
-            roi_set = self.select_capture_source(mode=capture_mode)
+        # The picker no longer requires ``show_preview`` (PR #24) - the
+        # Tk dialogs are independent of the OpenCV preview window, so
+        # users who run with ``--no-preview`` (e.g. on a remote macOS
+        # with no GUI for cv2.imshow but Tk available) still get a
+        # picker. Drag-ROI *does* need cv2 though, so when preview is
+        # off we force window mode; if Quartz/Tk are unavailable the
+        # script ends up at the default monitor and prints a clear
+        # warning instead of silently doing nothing.
+        effective_mode = capture_mode
+        if not show_preview and capture_mode != "window":
+            effective_mode = "window"
+        if auto_roi:
+            roi_set = self.select_capture_source(mode=effective_mode)
         # Persist the flag so the 'r' hotkey honours --no-auto-clamp
         # at runtime too (not just at startup).
         self.auto_clamp = auto_clamp
-        self._capture_mode = capture_mode
-        if auto_clamp and roi_set:
+        self._capture_mode = effective_mode
+        # Skip auto-clamp in window-picker mode (PR #24): the user
+        # already picked a specific window so the ROI cannot include
+        # terminal noise the way a drag-ROI can. The 1-shot YOLO pass
+        # often *worsens* detection in window mode by tightening into
+        # a partial UI fragment (e.g. just the betting cells), so we
+        # only run it for drag-ROI captures where it was originally
+        # designed for.
+        if auto_clamp and roi_set and self.window_id is None:
             # The model was trained on tightly-cropped game frames at
             # imgsz=800. When the user drags an over-broad ROI the game
             # is downscaled below the size the model can recognise. One
@@ -722,10 +788,26 @@ class RealtimeCapture:
             # log line right after bailing out.
             mode = getattr(self, "_capture_mode", "auto")
             changed = self.select_capture_source(mode=mode)
-            if changed and getattr(self, "auto_clamp", True):
+            # Same window-mode skip as ``start()``: auto-clamp is
+            # designed for drag-ROI captures and tends to trim into a
+            # partial UI fragment when used against an already-tight
+            # window region.
+            if (
+                changed
+                and getattr(self, "auto_clamp", True)
+                and self.window_id is None
+            ):
                 self.auto_clamp_roi()
         elif key == ord("c"):
-            self.auto_clamp_roi()
+            if self.window_id is not None:
+                print(
+                    "[auto-clamp] skipped: window-picker mode reads the "
+                    "window's full bbox via Quartz, no clamp needed. "
+                    "Press 'r' to switch to drag-ROI if you really want "
+                    "to clamp into a sub-region."
+                )
+            else:
+                self.auto_clamp_roi()
         elif key == ord("s"):
             cv2.imwrite("preview_capture.png", frame)
             print("Saved preview_capture.png")

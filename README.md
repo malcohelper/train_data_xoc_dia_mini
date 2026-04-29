@@ -99,6 +99,8 @@ pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # macOS-only (window picker, see "Capture source" below):
 # pip install pyobjc-framework-Quartz
+# brew install python-tk@3.11   # Tk for the picker dialog (Homebrew
+#                                # Python doesn't bundle it by default)
 ```
 
 ## Repo layout
@@ -290,9 +292,33 @@ Picking a window via Quartz sidesteps that entirely and also lets the
 script auto-follow the window when you reposition it (re-checked
 every 5 s by default, see `RealtimeCapture.window_refresh_interval`).
 
-The window picker requires `pyobjc-framework-Quartz` on macOS; on
-other platforms or when the package isn't installed `list_windows()`
-returns `[]` and the dialog falls back to drag-ROI.
+In window-picker mode the capture pipeline reads pixels straight from
+the window's backing store via `CGWindowListCreateImage`, **not** from
+screen coordinates. That means:
+
+- the OpenCV preview window we render ourselves can sit anywhere on
+  screen (even on top of the game) without contaminating the captured
+  frame,
+- notifications, dialogs, and other apps in front of the game don't
+  cause `dets=0` ticks,
+- the game can even be on a different macOS Space and we still get
+  real frames.
+
+`mss` screen-region capture is still used for drag-ROI mode and as a
+fallback when the Quartz call fails (e.g. window closed mid-loop).
+
+Auto-clamp (`--no-auto-clamp` to disable) only runs in drag-ROI mode.
+In window mode the captured region is already exactly the window
+content and the 1-shot YOLO clamp pass tends to trim into a partial
+UI fragment (e.g. just the betting cells, missing the scoreboard the
+model needs as context); the `c` hotkey is also a no-op in window
+mode for the same reason.
+
+The window picker requires `pyobjc-framework-Quartz` *and* `tkinter`
+on macOS. Homebrew Python 3.11 doesn't bundle Tk - install it with
+`brew install python-tk@3.11` (or the matching version for your
+Python). On other platforms or when those packages aren't installed
+the dialog falls back to drag-ROI with a clear log message.
 
 ### Analytics dashboard
 

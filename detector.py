@@ -63,17 +63,26 @@ class Detection:
 class XocDiaDetector:
     """Thin wrapper around ``ultralytics.YOLO`` with typed outputs.
 
-    Crop-fallback recall (``crop_fallback_threshold`` / ``crop_fallback_top_pct``)
-    is a defensive second pass: when the first full-frame inference returns
-    fewer detections than ``crop_fallback_threshold`` we re-run YOLO on the
-    bottom ``1 - crop_fallback_top_pct`` of the frame. Empirically the
-    history-percent overlay that the game UI sometimes paints across the
-    top of the screen confuses the network and zeroes out detections; the
-    crop trims that overlay off and lets the betting panel features win
-    again. Bbox coordinates from the crop are shifted back into the
-    original frame's coordinate space and merged via per-class NMS so
-    callers see one consistent list. Set ``crop_fallback_threshold=0`` to
-    disable.
+    Two layered fallbacks rescue scenes the primary pass misses:
+
+    1. **imgsz fallback** (``imgsz_fallback`` / ``fallback_threshold``):
+       when the primary pass at ``imgsz`` returns fewer than
+       ``fallback_threshold`` detections, re-run YOLO on the same frame
+       at ``imgsz_fallback`` (typically larger). This rescues frames
+       captured at higher resolutions than training - e.g. a 1920x1080
+       Safari window run at ``imgsz=800`` downsamples the betting panel
+       cells past the model's effective receptive field; ``imgsz=1280``
+       keeps them at a recognisable scale.
+    2. **crop fallback** (``crop_fallback_top_pct``): if both the
+       primary and the imgsz-bumped pass still come up short, drop the
+       top ``crop_fallback_top_pct`` of the frame (where the history-%
+       CHĂN/LẺ overlay tends to sit) and re-run at ``imgsz_fallback``.
+       Bbox coordinates from the crop are shifted back into the
+       original frame's coordinate space.
+
+    All three result sets are merged through per-class NMS
+    (``crop_fallback_iou``) so callers see one consistent list. Set
+    ``fallback_threshold=0`` to disable both fallbacks.
     """
 
     def __init__(
@@ -83,28 +92,44 @@ class XocDiaDetector:
         iou: float = 0.45,
         device: Optional[str] = None,
         imgsz: int = 800,
-        crop_fallback_threshold: int = 3,
+        imgsz_fallback: int = 1280,
+        fallback_threshold: int = 3,
         crop_fallback_top_pct: float = 0.30,
         crop_fallback_iou: float = 0.5,
+        # Back-compat alias - older callers passed ``crop_fallback_threshold``.
+        crop_fallback_threshold: Optional[int] = None,
     ):
         self.model = YOLO(weights)
         self.conf = conf
         self.iou = iou
         self.device = device
         self.imgsz = imgsz
-        self.crop_fallback_threshold = crop_fallback_threshold
+        self.imgsz_fallback = imgsz_fallback
+        if crop_fallback_threshold is not None:
+            fallback_threshold = crop_fallback_threshold
+        self.fallback_threshold = fallback_threshold
         self.crop_fallback_top_pct = crop_fallback_top_pct
         self.crop_fallback_iou = crop_fallback_iou
 
+    # Back-compat read-only alias so external callers / configs that
+    # still reference the old attribute name keep working.
+    @property
+    def crop_fallback_threshold(self) -> int:
+        return self.fallback_threshold
+
     # ---------- inference ----------
 
-    def _infer(self, frame: np.ndarray) -> List[Detection]:
+    def _infer(
+        self,
+        frame: np.ndarray,
+        imgsz: Optional[int] = None,
+    ) -> List[Detection]:
         results = self.model(
             frame,
             conf=self.conf,
             iou=self.iou,
             device=self.device,
-            imgsz=self.imgsz,
+            imgsz=imgsz if imgsz is not None else self.imgsz,
             verbose=False,
         )[0]
 
@@ -163,24 +188,41 @@ class XocDiaDetector:
     def detect(self, frame: np.ndarray) -> List[Detection]:
         primary = self._infer(frame)
 
+        if self.fallback_threshold <= 0 or len(primary) >= self.fallback_threshold:
+            return primary
+
+        # Stage 1: same frame, larger imgsz. Cheap and rescues the
+        # common "big window + small training imgsz" failure mode.
+        merged = primary
         if (
-            self.crop_fallback_threshold <= 0
-            or len(primary) >= self.crop_fallback_threshold
-            or self.crop_fallback_top_pct <= 0
-            or self.crop_fallback_top_pct >= 1
+            self.imgsz_fallback > 0
+            and self.imgsz_fallback != self.imgsz
         ):
-            return primary
+            bigger = self._infer(frame, imgsz=self.imgsz_fallback)
+            merged = self._merge_with_nms(merged, bigger)
+            if len(merged) >= self.fallback_threshold:
+                return merged
 
-        h = frame.shape[0]
-        crop_top = int(h * self.crop_fallback_top_pct)
-        # Defensive guard: if cropping leaves too little of the frame,
-        # YOLO can't make use of it. Skip the fallback in that case.
-        if h - crop_top < 200:
-            return primary
+        # Stage 2: crop the top % (history overlay region) and retry at
+        # the bumped imgsz so the betting panel dominates the input.
+        if 0 < self.crop_fallback_top_pct < 1:
+            h = frame.shape[0]
+            crop_top = int(h * self.crop_fallback_top_pct)
+            # Defensive guard: too little frame left to be useful.
+            if h - crop_top >= 200:
+                cropped = frame[crop_top:]
+                crop_imgsz = (
+                    self.imgsz_fallback
+                    if self.imgsz_fallback > 0
+                    else self.imgsz
+                )
+                crop_dets = self._shift_y(
+                    self._infer(cropped, imgsz=crop_imgsz),
+                    crop_top,
+                )
+                merged = self._merge_with_nms(merged, crop_dets)
 
-        cropped = frame[crop_top:]
-        crop_dets = self._shift_y(self._infer(cropped), crop_top)
-        return self._merge_with_nms(primary, crop_dets)
+        return merged
 
     def detect_batch(self, frames: Iterable[np.ndarray]) -> List[List[Detection]]:
         return [self.detect(f) for f in frames]

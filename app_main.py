@@ -48,15 +48,44 @@ def _is_bundled() -> bool:
 
 
 def _bundle_resources_dir() -> Optional[Path]:
-    """Return ``Contents/Resources/`` for a py2app bundle, or ``None``
-    when running from source."""
+    """Return the directory the bundle keeps its data files in,
+    or ``None`` when running from source.
+
+    Layout differences we handle:
+
+    * **PyInstaller --windowed .app**: ``datas=[(src, ".")]`` ships the
+      file next to the binary in ``Contents/MacOS/`` and exposes that
+      directory via ``sys._MEIPASS``. This is the *default* path we
+      check.
+    * **py2app .app**: data files land in ``Contents/Resources/``
+      (one level up from ``Contents/MacOS``).
+
+    We try them in that order and return the first one that contains
+    ``best.pt`` (or just exists, if best.pt isn't there yet during
+    early init).
+    """
     if not _is_bundled():
         return None
+
+    # PyInstaller exposes its data dir explicitly.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        meipass_path = Path(meipass).resolve()
+        if (meipass_path / "best.pt").is_file():
+            return meipass_path
+
     # py2app: executable is at Contents/MacOS/XocDia, resources at
-    # Contents/Resources/. PyInstaller --onedir uses the same layout.
+    # Contents/Resources/.
     exe = Path(sys.executable).resolve()
-    candidate = exe.parent.parent / "Resources"
-    return candidate if candidate.is_dir() else None
+    legacy_resources = exe.parent.parent / "Resources"
+    if (legacy_resources / "best.pt").is_file():
+        return legacy_resources
+
+    # Last resort: return whichever directory exists, even if best.pt
+    # isn't there yet (caller will surface a clearer error).
+    if meipass:
+        return Path(meipass).resolve()
+    return legacy_resources if legacy_resources.is_dir() else None
 
 
 def _user_app_dir() -> Path:

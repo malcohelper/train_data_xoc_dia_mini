@@ -28,9 +28,12 @@ rounds/
 debug_cells/
 dataset/
 
-# py2app build artifacts (BUILD.md describes the build flow)
+# PyInstaller / py2app build artifacts (BUILD.md describes the build flow)
 build/
 dist/
 *.app/
 *.icns~
+# NB: ``xocdia.spec`` is hand-written + committed; only ignore generated
+# spec files that PyInstaller creates next to scripts.
 *.spec
+!xocdia.spec

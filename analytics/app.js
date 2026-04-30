@@ -184,28 +184,39 @@
     container.innerHTML = "";
 
     const ROWS = 6;
-    // matrix[row][col] = type or undefined. Used to dodge collisions
-    // when a streak is longer than 6 (Baccarat Big Road rule: streak
-    // fills a column top-down, then tail-hooks right).
+    // matrix[row][col] = type or undefined. Each streak fills a column
+    // top-down. When a streak is longer than ROWS (6) it wraps to the
+    // next column at row 0 - matching the game's own BẢNG CẦU. This
+    // differs from the classic Baccarat "dragon tail" (which hooks
+    // right at the last row); the game in question wraps to row 0.
     const matrix = Array.from({ length: ROWS }, () => []);
     let curR = 0;
     let curC = 0;
     let prevType = null;
+
+    // Advance ``curC`` to the next column whose row 0 is empty. Keeps
+    // us from overwriting an earlier streak when a long one wraps or
+    // when a new streak starts.
+    const advanceToEmptyColumn = () => {
+      curC++;
+      while (matrix[0][curC]) curC++;
+    };
 
     list.forEach((item) => {
       if (item.type !== prevType) {
         // New streak: next empty column, row 0.
         curR = 0;
         if (prevType !== null) {
-          curC++;
-          while (matrix[0][curC]) curC++;
+          advanceToEmptyColumn();
         }
       } else {
-        // Same streak: continue down unless row-bottom or occupied.
+        // Same streak: continue down until the column is full, then
+        // wrap to row 0 of the next empty column.
         if (curR + 1 < ROWS && !matrix[curR + 1][curC]) {
           curR++;
         } else {
-          curC++;
+          curR = 0;
+          advanceToEmptyColumn();
         }
       }
 

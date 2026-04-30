@@ -58,6 +58,7 @@ from classes import (
     EXPECTED_INSTANCES_PER_FRAME,
     category_of,
 )
+from detector import XocDiaDetector
 
 
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
@@ -115,6 +116,24 @@ def parse_args():
         type=int,
         default=800,
     )
+    parser.add_argument(
+        "--imgsz-fallback",
+        type=int,
+        default=1280,
+        help="Secondary imgsz for the multi-scale ensemble. Recovers "
+             "small-text classes (percent_cell, timer, total_count_cell) "
+             "that the primary imgsz downsamples past the model's "
+             "receptive field. Set to 0 to disable.",
+    )
+    parser.add_argument(
+        "--no-imgsz-fallback-always",
+        dest="imgsz_fallback_always",
+        action="store_false",
+        help="Only trigger the imgsz fallback when the primary pass "
+             "returns fewer than 3 dets (faster but misses small-text "
+             "classes on high-res captures). Default is always-on.",
+    )
+    parser.set_defaults(imgsz_fallback_always=True)
     parser.add_argument(
         "--device",
         default=None,
@@ -239,10 +258,19 @@ def main():
     model_conf = min(conf_by_cat.values())
 
     print(f"Loading weights: {weights}")
-    # Imported lazily so importing this file (e.g. for tests) doesn't
-    # require the heavy ultralytics stack.
-    from ultralytics import YOLO  # noqa: WPS433
-    model = YOLO(str(weights))
+    # XocDiaDetector wraps ultralytics.YOLO with the multi-scale fallback
+    # (primary @ imgsz + secondary @ imgsz_fallback, merged via per-class
+    # NMS) so semi-auto labelling on high-res frames catches the small-
+    # text classes that vanish at imgsz=800 alone.
+    detector = XocDiaDetector(
+        weights=str(weights),
+        conf=model_conf,
+        iou=args.iou,
+        imgsz=args.imgsz,
+        imgsz_fallback=args.imgsz_fallback,
+        imgsz_fallback_always=args.imgsz_fallback_always,
+        device=args.device,
+    )
 
     preview_dir = Path(args.preview_dir) if args.preview_dir else None
     if preview_dir:
@@ -263,26 +291,14 @@ def main():
             continue
         h, w = img.shape[:2]
 
-        results = model(
-            img,
-            conf=model_conf,
-            iou=args.iou,
-            imgsz=args.imgsz,
-            device=args.device,
-            verbose=False,
-        )[0]
+        detections = detector.detect(img)
 
         raw = []
-        if results.boxes is not None:
-            xyxy = results.boxes.xyxy.cpu().numpy().astype(int)
-            cls_ids = results.boxes.cls.cpu().numpy().astype(int)
-            confs = results.boxes.conf.cpu().numpy()
-            for (x1, y1, x2, y2), cid, cf in zip(xyxy, cls_ids, confs):
-                cid = int(cid)
-                cat = category_of(cid)
-                if float(cf) < conf_by_cat.get(cat, 0.5):
-                    continue
-                raw.append((cid, float(cf), (int(x1), int(y1), int(x2), int(y2))))
+        for d in detections:
+            cat = category_of(d.class_id)
+            if d.conf < conf_by_cat.get(cat, 0.5):
+                continue
+            raw.append((d.class_id, d.conf, d.bbox))
 
         kept = cap_per_class(raw)
 

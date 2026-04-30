@@ -89,21 +89,50 @@ The row order is `PERCENT_ROW_ORDER`, defined once in `pipeline.py` and
 imported from there by `realtime_capture.py`. Edit that single list if the
 scoreboard layout changes.
 
-## Install
+## Quick start (macOS source distribution)
+
+For end users who just want to run the detector with a pre-trained
+`best.pt`, the repository ships an all-in-one launcher:
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+`run.sh` will, in order:
+
+1. Verify Python 3.11 (or 3.12) and tkinter are installed (and print
+   the exact `brew` / python.org install hint if not).
+2. Create `./venv` on first run and install everything from
+   `requirements.txt` (one-time, ~5-10 minutes).
+3. Discover every `runs/detect/**/best.pt`. With one model it
+   auto-picks; with several it prompts a numbered menu.
+4. Launch `python realtime_capture.py --weights <picked> --diag`.
+
+Subsequent launches reuse the venv and are instant. Useful flags:
+
+```bash
+./run.sh --weights /path/to/best.pt    # skip the picker
+./run.sh --no-diag                     # quieter output
+./run.sh -- <any other realtime_capture.py flag>
+```
+
+Don't forget to grant **Screen Recording permission** to the
+Terminal app (System Settings -> Privacy & Security -> Screen
+Recording) on the first launch so ScreenCaptureKit can read frames
+across macOS Spaces.
+
+## Install (manual / non-macOS)
 
 ```bash
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install ultralytics opencv-python paddleocr paddlepaddle numpy mss pillow
+pip install -r requirements.txt
 # GPU-only:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# macOS-only (window picker, see "Capture source" below):
-# pip install pyobjc-framework-Quartz pyobjc-framework-ScreenCaptureKit
+# macOS Homebrew Python only:
 # brew install python-tk@3.11   # Tk for the picker dialog (Homebrew
 #                                # Python doesn't bundle it by default)
-# After install, grant Screen Recording permission to your terminal
-# in System Settings -> Privacy & Security -> Screen Recording so
-# ScreenCaptureKit can capture live frames across macOS Spaces.
 ```
 
 ## Repo layout

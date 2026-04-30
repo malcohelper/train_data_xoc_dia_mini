@@ -69,6 +69,10 @@ class LabelTool:
         autosave=True,
         auto_next_class=True,
         filter_class_ids=None,
+        detector_weights=None,
+        detector_conf=0.25,
+        detector_imgsz=800,
+        detector_imgsz_fallback=1280,
     ):
         self.images_folder = Path(images_folder)
         self.labels_folder = Path(labels_folder)
@@ -84,6 +88,15 @@ class LabelTool:
         # of class ids - in which case ``collect_images`` is restricted
         # to frames whose label file contains at least one of those ids.
         self.filter_class_ids = set(filter_class_ids) if filter_class_ids else None
+
+        # On-demand YOLO auto-detect (bound to the 'y' hotkey). The
+        # detector is lazy-loaded on first use so startup stays fast
+        # when the user never presses 'y'.
+        self.detector_weights = detector_weights
+        self.detector_conf = detector_conf
+        self.detector_imgsz = detector_imgsz
+        self.detector_imgsz_fallback = detector_imgsz_fallback
+        self.detector = None
         self.current_class = 0
         self.boxes = []
         self.drawing = False
@@ -198,6 +211,69 @@ class LabelTool:
             return
         self.boxes = self.load_labels(prev_label)
         print(f"Copied {len(self.boxes)} boxes from {prev_label.name}")
+
+    def _ensure_detector(self):
+        """Lazy-load the YOLO detector used by the 'y' hotkey."""
+        if self.detector is not None:
+            return
+        if not self.detector_weights:
+            print(
+                "[auto-detect] --weights was not provided; 'y' hotkey is "
+                "disabled. Pass --weights <path/to/best.pt> on startup."
+            )
+            return
+        from detector import XocDiaDetector
+
+        print(f"[auto-detect] Loading weights: {self.detector_weights}")
+        self.detector = XocDiaDetector(
+            weights=self.detector_weights,
+            conf=self.detector_conf,
+            imgsz=self.detector_imgsz,
+            imgsz_fallback=self.detector_imgsz_fallback,
+        )
+        print(
+            f"[auto-detect] Ready. conf={self.detector_conf} "
+            f"imgsz={self.detector_imgsz}+{self.detector_imgsz_fallback}. "
+            f"Press 'y' on any frame to (re)run detection."
+        )
+
+    def auto_detect_current_frame(self):
+        """Run the YOLO detector on the current image and REPLACE boxes
+        with its predictions. User can then edit / delete / add as normal.
+        """
+        self._ensure_detector()
+        if self.detector is None or self.current_img is None:
+            return
+
+        h, w = self.current_img.shape[:2]
+        if h <= 0 or w <= 0:
+            return
+
+        dets = self.detector.detect(self.current_img)
+        new_boxes = []
+        for d in dets:
+            x1, y1, x2, y2 = d.bbox
+            # Clamp to the image bounds (detector already does this but
+            # belt-and-braces for YOLO format safety).
+            x1 = max(0, min(x1, w - 1))
+            x2 = max(0, min(x2, w - 1))
+            y1 = max(0, min(y1, h - 1))
+            y2 = max(0, min(y2, h - 1))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            cx = ((x1 + x2) / 2.0) / w
+            cy = ((y1 + y2) / 2.0) / h
+            bw = (x2 - x1) / w
+            bh = (y2 - y1) / h
+            new_boxes.append({"class": int(d.class_id), "bbox": [cx, cy, bw, bh]})
+
+        prev_count = len(self.boxes)
+        self.boxes = new_boxes
+        self.selected_box = None
+        print(
+            f"[auto-detect] {self.current_img_path.name}: replaced "
+            f"{prev_count} existing -> {len(new_boxes)} predictions"
+        )
 
     def _find_box_at(self, x, y):
         """Return index of the smallest box containing (x, y), or None."""
@@ -333,9 +409,12 @@ class LabelTool:
         controls_1 = "0-9: class | j/k: prev/next | / + NN + Enter: jump class | t: auto-next"
         controls_2 = "u: undo | x: clear class | c: copy prev | Click: select | d: del sel | Esc: desel"
         controls_3 = "w+0-9: save tpl | e+0-9: apply tpl | p: prev | space: next | s: save | a: autosave | q: quit"
+        y_hint = "y: YOLO auto-detect (replace boxes)" if self.detector_weights else ""
         cv2.putText(frame, controls_1, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
         cv2.putText(frame, controls_2, (10, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
         cv2.putText(frame, controls_3, (10, 82), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
+        if y_hint:
+            cv2.putText(frame, y_hint, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 220, 255), 1)
 
         sel_text = ""
         if self.selected_box is not None and self.selected_box < len(self.boxes):
@@ -347,15 +426,17 @@ class LabelTool:
             f"auto-next-class={'ON' if self.auto_next_class else 'OFF'} | "
             f"boxes={len(self.boxes)}{sel_text}"
         )
-        cv2.putText(frame, status, (10, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 220, 80), 1)
+        status_y = 120 if self.detector_weights else 102
+        cv2.putText(frame, status, (10, status_y), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 220, 80), 1)
 
         # Mode banners
         extra_y = 0
+        banner_y_base = 142 if self.detector_weights else 124
         if self.class_input_mode:
             cv2.putText(
                 frame,
                 f"Class input: '{self.class_input_buffer}_' (Enter to apply, Esc to cancel)",
-                (10, 124),
+                (10, banner_y_base),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 200, 255),
@@ -370,7 +451,7 @@ class LabelTool:
             cv2.putText(
                 frame,
                 f"Template {action} slot 0-9 (used: [{slots_str}]) | Esc to cancel",
-                (10, 124 + extra_y),
+                (10, banner_y_base + extra_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 255, 180),
@@ -383,7 +464,7 @@ class LabelTool:
         for box in self.boxes:
             class_counts[box["class"]] += 1
 
-        y = 124 + extra_y
+        y = banner_y_base + extra_y
         for group_name, ids in _STATUS_GROUPS:
             parts = [f"{cid}:{self.classes[cid]}({class_counts[cid]})" for cid in ids]
             line = f"{group_name:<6}| " + "  ".join(parts)
@@ -541,6 +622,10 @@ class LabelTool:
             self.save_labels(label_path)
             return "stay"
 
+        if key == ord("y"):
+            self.auto_detect_current_frame()
+            return "stay"
+
         if key == ord("p"):
             if self.autosave:
                 self.save_labels(label_path)
@@ -639,6 +724,35 @@ def parse_args():
              "dice_* detection. Useful for QA'ing a single class group "
              "without copying files into a separate folder.",
     )
+    parser.add_argument(
+        "--weights",
+        default=None,
+        help="Path to a YOLO best.pt. When provided, enables the 'y' "
+             "hotkey which runs the detector on the current frame and "
+             "replaces the canvas boxes with its predictions (you can "
+             "then edit / delete them like normal).",
+    )
+    parser.add_argument(
+        "--auto-detect-conf",
+        type=float,
+        default=0.25,
+        help="Min confidence for boxes returned by 'y' auto-detect. "
+             "Lower = more predictions (noisier but more recall). "
+             "Default 0.25.",
+    )
+    parser.add_argument(
+        "--auto-detect-imgsz",
+        type=int,
+        default=800,
+        help="Primary imgsz for 'y' auto-detect (default 800).",
+    )
+    parser.add_argument(
+        "--auto-detect-imgsz-fallback",
+        type=int,
+        default=1280,
+        help="Secondary imgsz (multi-scale ensemble) for 'y' "
+             "auto-detect (default 1280, 0 to disable).",
+    )
     return parser.parse_args()
 
 
@@ -658,5 +772,9 @@ if __name__ == "__main__":
         autosave=not args.no_autosave,
         auto_next_class=not args.no_auto_next_class,
         filter_class_ids=filter_class_ids,
+        detector_weights=args.weights,
+        detector_conf=args.auto_detect_conf,
+        detector_imgsz=args.auto_detect_imgsz,
+        detector_imgsz_fallback=args.auto_detect_imgsz_fallback,
     )
     tool.label_images()

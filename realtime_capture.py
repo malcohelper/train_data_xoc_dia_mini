@@ -269,7 +269,7 @@ class RealtimeCapture:
     def __init__(
         self,
         weights: str = "runs/detect/xocdia/weights/best.pt",
-        conf: float = 0.4,
+        conf: float = 0.25,
         imgsz: int = 800,
         device=None,
         log_ocr_rejects: bool = False,
@@ -1026,8 +1026,12 @@ def _parse_args():
     parser.add_argument("--weights", default="runs/detect/xocdia/weights/best.pt")
     parser.add_argument("--interval", type=float, default=1.0,
                        help="Detection interval in seconds (default: 1.0)")
-    parser.add_argument("--conf", type=float, default=0.4,
-                       help="Detection confidence threshold (default: 0.4)")
+    parser.add_argument("--conf", type=float, default=0.25,
+                       help="Detection confidence threshold (default: 0.25). "
+                            "Empirically tools/diag_detection.py shows 0.25 "
+                            "recovers 5-7 extra cells per frame (mostly "
+                            "percent_cell + total_*_cell) without false "
+                            "positives at imgsz=800.")
     parser.add_argument("--imgsz", type=int, default=800,
                        help="Inference image size (default: 800)")
     parser.add_argument("--device", default=None,

@@ -237,9 +237,42 @@ class LabelTool:
             f"Press 'y' on any frame to (re)run detection."
         )
 
-    def auto_detect_current_frame(self):
-        """Run the YOLO detector on the current image and REPLACE boxes
-        with its predictions. User can then edit / delete / add as normal.
+    @staticmethod
+    def _yolo_iou(a, b):
+        """IoU between two YOLO-format boxes [cx, cy, w, h] (normalised)."""
+        ax1 = a[0] - a[2] / 2.0
+        ay1 = a[1] - a[3] / 2.0
+        ax2 = a[0] + a[2] / 2.0
+        ay2 = a[1] + a[3] / 2.0
+        bx1 = b[0] - b[2] / 2.0
+        by1 = b[1] - b[3] / 2.0
+        bx2 = b[0] + b[2] / 2.0
+        by2 = b[1] + b[3] / 2.0
+        ix1 = max(ax1, bx1)
+        iy1 = max(ay1, by1)
+        ix2 = min(ax2, bx2)
+        iy2 = min(ay2, by2)
+        iw = max(0.0, ix2 - ix1)
+        ih = max(0.0, iy2 - iy1)
+        inter = iw * ih
+        if inter <= 0:
+            return 0.0
+        area_a = max(0.0, (ax2 - ax1) * (ay2 - ay1))
+        area_b = max(0.0, (bx2 - bx1) * (by2 - by1))
+        union = area_a + area_b - inter
+        if union <= 0:
+            return 0.0
+        return inter / union
+
+    def auto_detect_current_frame(self, replace=False, iou_thresh=0.45):
+        """Run the YOLO detector on the current image and MERGE its
+        predictions into the canvas (default) or REPLACE all existing
+        boxes (when ``replace=True``).
+
+        Merge rule: a predicted box is appended only if it does NOT
+        overlap an existing box of the SAME class with IoU >= iou_thresh.
+        This preserves any manually-drawn boxes while filling in classes
+        the user has not yet labelled.
         """
         self._ensure_detector()
         if self.detector is None or self.current_img is None:
@@ -250,7 +283,7 @@ class LabelTool:
             return
 
         dets = self.detector.detect(self.current_img)
-        new_boxes = []
+        pred_boxes = []
         for d in dets:
             x1, y1, x2, y2 = d.bbox
             # Clamp to the image bounds (detector already does this but
@@ -265,14 +298,41 @@ class LabelTool:
             cy = ((y1 + y2) / 2.0) / h
             bw = (x2 - x1) / w
             bh = (y2 - y1) / h
-            new_boxes.append({"class": int(d.class_id), "bbox": [cx, cy, bw, bh]})
+            pred_boxes.append({"class": int(d.class_id), "bbox": [cx, cy, bw, bh]})
 
         prev_count = len(self.boxes)
-        self.boxes = new_boxes
+
+        if replace:
+            self.boxes = pred_boxes
+            self.selected_box = None
+            print(
+                f"[auto-detect] {self.current_img_path.name}: REPLACED "
+                f"{prev_count} existing -> {len(pred_boxes)} predictions"
+            )
+            return
+
+        # MERGE: append predictions that don't overlap an existing box
+        # of the same class (IoU < threshold).
+        added = 0
+        skipped = 0
+        for p in pred_boxes:
+            dup = False
+            for existing in self.boxes:
+                if existing["class"] != p["class"]:
+                    continue
+                if self._yolo_iou(existing["bbox"], p["bbox"]) >= iou_thresh:
+                    dup = True
+                    break
+            if dup:
+                skipped += 1
+            else:
+                self.boxes.append(p)
+                added += 1
         self.selected_box = None
         print(
-            f"[auto-detect] {self.current_img_path.name}: replaced "
-            f"{prev_count} existing -> {len(new_boxes)} predictions"
+            f"[auto-detect] {self.current_img_path.name}: merged "
+            f"{added} new (skipped {skipped} dupes of existing) -> "
+            f"{len(self.boxes)} total boxes"
         )
 
     def _find_box_at(self, x, y):
@@ -409,7 +469,7 @@ class LabelTool:
         controls_1 = "0-9: class | j/k: prev/next | / + NN + Enter: jump class | t: auto-next"
         controls_2 = "u: undo | x: clear class | c: copy prev | Click: select | d: del sel | Esc: desel"
         controls_3 = "w+0-9: save tpl | e+0-9: apply tpl | p: prev | space: next | s: save | a: autosave | q: quit"
-        y_hint = "y: YOLO auto-detect (replace boxes)" if self.detector_weights else ""
+        y_hint = "y: YOLO auto-detect (merge) | Y: replace all" if self.detector_weights else ""
         cv2.putText(frame, controls_1, (10, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
         cv2.putText(frame, controls_2, (10, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
         cv2.putText(frame, controls_3, (10, 82), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1)
@@ -623,7 +683,11 @@ class LabelTool:
             return "stay"
 
         if key == ord("y"):
-            self.auto_detect_current_frame()
+            self.auto_detect_current_frame(replace=False)
+            return "stay"
+
+        if key == ord("Y"):
+            self.auto_detect_current_frame(replace=True)
             return "stay"
 
         if key == ord("p"):

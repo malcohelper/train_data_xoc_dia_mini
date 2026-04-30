@@ -10,6 +10,43 @@ from classes import CLASSES, CLASS_GROUPS, COLORS
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
 
+def resolve_class_filter(tokens):
+    """Turn --filter-classes tokens into a set of class IDs.
+
+    Accepts any mix of:
+    - numeric class ID (e.g. ``7``)
+    - class name from ``CLASSES`` (e.g. ``dice_4r``)
+    - category name from ``CLASS_GROUPS`` (``state`` / ``area`` / ``dice``
+      / ``cell``), which expands to every class ID in that category.
+    """
+    name_to_id = {name: cid for cid, name in CLASSES.items()}
+    cat_to_ids = {cat: set(ids) for cat, ids in CLASS_GROUPS}
+    ids: set = set()
+    for raw in tokens:
+        tok = raw.strip()
+        if not tok:
+            continue
+        if tok.isdigit():
+            cid = int(tok)
+            if cid not in CLASSES:
+                raise SystemExit(
+                    f"Unknown class id {cid!r} in --filter-classes. "
+                    f"Valid: {sorted(CLASSES)}."
+                )
+            ids.add(cid)
+        elif tok in name_to_id:
+            ids.add(name_to_id[tok])
+        elif tok in cat_to_ids:
+            ids.update(cat_to_ids[tok])
+        else:
+            raise SystemExit(
+                f"Unknown --filter-classes token: {tok!r}. Valid: class id, "
+                f"class name ({sorted(name_to_id)}), or category "
+                f"({sorted(cat_to_ids)})."
+            )
+    return ids
+
+
 # Pretty labels used only for the status bar (keeps the existing UI wording).
 _STATUS_GROUP_LABELS = {
     "state": "State",
@@ -31,6 +68,7 @@ class LabelTool:
         only_unlabeled=False,
         autosave=True,
         auto_next_class=True,
+        filter_class_ids=None,
     ):
         self.images_folder = Path(images_folder)
         self.labels_folder = Path(labels_folder)
@@ -42,6 +80,10 @@ class LabelTool:
         self.only_unlabeled = only_unlabeled
         self.autosave = autosave
         self.auto_next_class = auto_next_class
+        # ``filter_class_ids`` is None for no filter, or a non-empty set
+        # of class ids - in which case ``collect_images`` is restricted
+        # to frames whose label file contains at least one of those ids.
+        self.filter_class_ids = set(filter_class_ids) if filter_class_ids else None
         self.current_class = 0
         self.boxes = []
         self.drawing = False
@@ -66,6 +108,19 @@ class LabelTool:
         self.template_mode = None
 
         self.images = self.collect_images()
+        if self.filter_class_ids:
+            total_before = len(self.images)
+            self.images = [
+                p for p in self.images
+                if self._label_has_any_class(p, self.filter_class_ids)
+            ]
+            names = ", ".join(
+                sorted(self.classes[c] for c in self.filter_class_ids)
+            )
+            print(
+                f"[filter] Showing {len(self.images)}/{total_before} images "
+                f"whose labels contain any of: {names}"
+            )
         if self.only_unlabeled:
             self.images = [p for p in self.images if not self.get_label_path(p).exists()]
         else:
@@ -87,6 +142,29 @@ class LabelTool:
 
     def get_label_path(self, img_path: Path):
         return self.labels_folder / f"{img_path.stem}.txt"
+
+    def _label_has_any_class(self, img_path: Path, wanted: set) -> bool:
+        """Return True if ``img_path``'s label file has a box whose class
+        id is in ``wanted``. Missing/empty label files count as no match.
+        """
+        lbl = self.get_label_path(img_path)
+        if not lbl.exists():
+            return False
+        try:
+            lines = lbl.read_text().splitlines()
+        except OSError:
+            return False
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) != 5:
+                continue
+            try:
+                cid = int(parts[0])
+            except ValueError:
+                continue
+            if cid in wanted:
+                return True
+        return False
 
     def load_labels(self, label_path: Path):
         loaded = []
@@ -548,6 +626,19 @@ def parse_args():
         action="store_true",
         help="Disable auto jump to next class after each drawn box.",
     )
+    parser.add_argument(
+        "--filter-classes",
+        nargs="+",
+        default=None,
+        metavar="ID|NAME|CATEGORY",
+        help="Only open images whose label file contains at least one "
+             "box matching any of the given tokens. Accepts class ids "
+             "(e.g. 7), class names (e.g. dice_4r), or category names "
+             "(state/area/dice/cell, expanded to all ids in the group). "
+             "Example: --filter-classes dice  -> every frame with any "
+             "dice_* detection. Useful for QA'ing a single class group "
+             "without copying files into a separate folder.",
+    )
     return parser.parse_args()
 
 
@@ -556,11 +647,16 @@ if __name__ == "__main__":
     images_folder = args.images_folder or f"{args.dataset_root}/images/{args.split}"
     labels_folder = args.labels_folder or f"{args.dataset_root}/labels/{args.split}"
 
+    filter_class_ids = (
+        resolve_class_filter(args.filter_classes) if args.filter_classes else None
+    )
+
     tool = LabelTool(
         images_folder=images_folder,
         labels_folder=labels_folder,
         only_unlabeled=args.only_unlabeled,
         autosave=not args.no_autosave,
         auto_next_class=not args.no_auto_next_class,
+        filter_class_ids=filter_class_ids,
     )
     tool.label_images()

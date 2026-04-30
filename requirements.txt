@@ -1,6 +1,6 @@
 # Runtime dependencies for XocDia source distribution.
-# Pinned to versions verified working on macOS 12.3+ / Apple Silicon /
-# Python 3.11. Install via run.sh (recommended) or:
+# Verified working on macOS 12.3+ / Apple Silicon / Python 3.11.
+# Install via run.sh (recommended) or:
 #     pip install -r requirements.txt
 #
 # tkinter is part of the Python standard library but is NOT included
@@ -8,29 +8,32 @@
 # fails, install it with:
 #     brew install python-tk@3.11
 # (or use the python.org installer which bundles Tk).
+#
+# Versioning policy: ML wheels evolve fast. We pin minimum-known-good
+# versions but allow patch/minor upgrades so end users stay close to
+# whatever paddleocr / ultralytics ship today. The previous '==' pins
+# accidentally downgraded users who already had newer versions and
+# silently regressed inference quality (see PR #29 follow-up).
 
 # --- core ML stack ---
-ultralytics==8.4.41
-torch==2.11.0
-torchvision==0.26.0
+ultralytics>=8.4.43
+torch>=2.11.0
+torchvision>=0.26.0
 
 # --- OCR stack ---
-paddleocr==3.5.0
-paddlepaddle==3.0.0
-# paddlex is a transitive dependency of paddleocr 3.x but pin so the
-# bundled-in module-import-time `import modelscope` doesn't trip on a
-# version skew.
-paddlex==3.5.1
+paddleocr>=3.5.0
+paddlepaddle>=3.3.1
+# paddlex is a transitive of paddleocr 3.x; pinned because its
+# top-level `import modelscope` makes module-version skew fatal.
+paddlex>=3.5.1
 
 # --- imaging / capture ---
-opencv-python==4.13.0.92
-numpy==2.3.5
-mss==10.2.0
+opencv-python>=4.10.0.84
+numpy>=2.0
+mss>=10.0
 pillow
 
 # --- macOS-only window picker / ScreenCaptureKit ---
-# pip silently ignores these on Linux/Windows because the wheels are
-# tagged `platform_system == "Darwin"`. They're required for live
-# capture on macOS, so we list them unconditionally and let pip skip.
-pyobjc-framework-Quartz; sys_platform == "darwin"
-pyobjc-framework-ScreenCaptureKit; sys_platform == "darwin"
+# pip silently skips these on non-Darwin platforms.
+pyobjc-framework-Quartz>=12.0; sys_platform == "darwin"
+pyobjc-framework-ScreenCaptureKit>=12.0; sys_platform == "darwin"

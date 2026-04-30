@@ -107,22 +107,25 @@ def main() -> int:
             f".diag.c{int(conf*100):02d}_i{imgsz}.png")
         annotate(frame, dets, out_path)
 
-    # Side-by-side: production config WITH the crop-fallback enabled.
-    # This lets the operator see whether the second pass actually
-    # rescued anything compared to the equivalent single-pass row.
-    print("\nProduction config + crop fallback (top 30% trimmed when "
-          "primary < 3 dets):")
+    # Side-by-side: production config WITH layered fallbacks enabled
+    # (imgsz bump 800 -> 1280, then top-30% crop @ 1280). Lets the
+    # operator see whether the fallbacks actually rescued anything
+    # compared to the equivalent single-pass rows above.
+    print("\nProduction config + layered fallbacks "
+          "(imgsz 800 -> 1280, then top-30% crop @ 1280, "
+          "triggered when dets < 3):")
     print("-" * 72)
     fb_det = XocDiaDetector(weights=args.weights, conf=0.25, imgsz=800,
                             device=args.device,
-                            crop_fallback_threshold=3,
+                            imgsz_fallback=1280,
+                            fallback_threshold=3,
                             crop_fallback_top_pct=0.30)
     fb_dets = fb_det.detect(frame)
     fb_per_cls = Counter(d.class_name for d in fb_dets)
     fb_per_cls_str = ", ".join(f"{k}={v}" for k, v in
                                sorted(fb_per_cls.items())) or "-"
     print(f"conf=0.25 imgsz= 800  total={len(fb_dets):>3}  "
-          f"per_cls=[{fb_per_cls_str}]  (with fallback)")
+          f"per_cls=[{fb_per_cls_str}]  (with fallbacks)")
     annotate(frame, fb_dets,
              frame_path.with_suffix(".diag.c25_i800_fb.png"))
 

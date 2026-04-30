@@ -65,24 +65,30 @@ class XocDiaDetector:
 
     Two layered fallbacks rescue scenes the primary pass misses:
 
-    1. **imgsz fallback** (``imgsz_fallback`` / ``fallback_threshold``):
-       when the primary pass at ``imgsz`` returns fewer than
-       ``fallback_threshold`` detections, re-run YOLO on the same frame
-       at ``imgsz_fallback`` (typically larger). This rescues frames
-       captured at higher resolutions than training - e.g. a 1920x1080
-       Safari window run at ``imgsz=800`` downsamples the betting panel
-       cells past the model's effective receptive field; ``imgsz=1280``
-       keeps them at a recognisable scale.
-    2. **crop fallback** (``crop_fallback_top_pct``): if both the
-       primary and the imgsz-bumped pass still come up short, drop the
-       top ``crop_fallback_top_pct`` of the frame (where the history-%
+    1. **imgsz fallback** (``imgsz_fallback``, runs ALWAYS by default):
+       always re-run YOLO at a larger ``imgsz_fallback`` and merge.
+       The previous version gated this behind ``fallback_threshold``,
+       which fired only when primary returned <3 dets - but in
+       practice the small-text classes (``percent_cell``, ``timer``,
+       ``total_count_cell``) are exactly the ones that vanish at
+       ``imgsz=800`` while the larger panel boxes stay visible, so
+       primary returns ``len ~= 11`` with the small classes missing
+       and the gate never fires. Always-run is a multi-scale ensemble:
+       cheap (one extra forward pass) and recovers the small classes
+       reliably. Set ``imgsz_fallback_always=False`` to revert to the
+       threshold-gated behaviour, or ``imgsz_fallback=0`` to disable.
+    2. **crop fallback** (``crop_fallback_top_pct``, gated by
+       ``fallback_threshold``): if the merged result still has fewer
+       than ``fallback_threshold`` detections, drop the top
+       ``crop_fallback_top_pct`` of the frame (where the history-%
        CHĂN/LẺ overlay tends to sit) and re-run at ``imgsz_fallback``.
        Bbox coordinates from the crop are shifted back into the
-       original frame's coordinate space.
+       original frame's coordinate space. This is the more expensive
+       path so we keep it gated.
 
-    All three result sets are merged through per-class NMS
+    All result sets are merged through per-class NMS
     (``crop_fallback_iou``) so callers see one consistent list. Set
-    ``fallback_threshold=0`` to disable both fallbacks.
+    ``imgsz_fallback=0`` and ``fallback_threshold=0`` to disable both.
     """
 
     def __init__(
@@ -93,6 +99,7 @@ class XocDiaDetector:
         device: Optional[str] = None,
         imgsz: int = 800,
         imgsz_fallback: int = 1280,
+        imgsz_fallback_always: bool = True,
         fallback_threshold: int = 3,
         crop_fallback_top_pct: float = 0.30,
         crop_fallback_iou: float = 0.5,
@@ -105,6 +112,7 @@ class XocDiaDetector:
         self.device = device
         self.imgsz = imgsz
         self.imgsz_fallback = imgsz_fallback
+        self.imgsz_fallback_always = imgsz_fallback_always
         if crop_fallback_threshold is not None:
             fallback_threshold = crop_fallback_threshold
         self.fallback_threshold = fallback_threshold
@@ -187,25 +195,38 @@ class XocDiaDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         primary = self._infer(frame)
-
-        if self.fallback_threshold <= 0 or len(primary) >= self.fallback_threshold:
-            return primary
-
-        # Stage 1: same frame, larger imgsz. Cheap and rescues the
-        # common "big window + small training imgsz" failure mode.
         merged = primary
-        if (
+
+        # Stage 1: same frame at a larger imgsz so small-text classes
+        # (percent_cell / timer / total_count_cell) that get downsampled
+        # past the model's receptive field at imgsz=800 surface again
+        # at imgsz=1280. Always-run by default because primary alone is
+        # unreliable: it can return ~11 dets while still missing every
+        # percent_cell, which would never satisfy a ``len < N`` gate.
+        run_imgsz_fallback = (
             self.imgsz_fallback > 0
             and self.imgsz_fallback != self.imgsz
-        ):
+            and (
+                self.imgsz_fallback_always
+                or (
+                    self.fallback_threshold > 0
+                    and len(primary) < self.fallback_threshold
+                )
+            )
+        )
+        if run_imgsz_fallback:
             bigger = self._infer(frame, imgsz=self.imgsz_fallback)
             merged = self._merge_with_nms(merged, bigger)
-            if len(merged) >= self.fallback_threshold:
-                return merged
 
-        # Stage 2: crop the top % (history overlay region) and retry at
-        # the bumped imgsz so the betting panel dominates the input.
-        if 0 < self.crop_fallback_top_pct < 1:
+        # Stage 2 (gated): if even the multi-scale merge still under-
+        # detects, crop the top % (where the history-% overlay sits)
+        # and retry at the bumped imgsz so the betting panel dominates
+        # the input.
+        if (
+            self.fallback_threshold > 0
+            and len(merged) < self.fallback_threshold
+            and 0 < self.crop_fallback_top_pct < 1
+        ):
             h = frame.shape[0]
             crop_top = int(h * self.crop_fallback_top_pct)
             # Defensive guard: too little frame left to be useful.

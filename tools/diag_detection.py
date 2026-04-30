@@ -89,13 +89,15 @@ def main() -> int:
     print("\nSweep (conf, imgsz) -> total dets / per-class breakdown:")
     print("-" * 72)
     for conf, imgsz in SWEEPS:
-        # crop_fallback_threshold=0 disables the secondary cropped pass
-        # so the sweep here measures raw single-pass YOLO behaviour. A
-        # caller running the production pipeline gets the fallback's
-        # extra recall on top of these numbers.
+        # Disable both fallbacks so the sweep measures raw single-
+        # pass YOLO behaviour at this (conf, imgsz). A caller running
+        # the production pipeline gets the fallback's extra recall on
+        # top of these numbers.
         det = XocDiaDetector(weights=args.weights, conf=conf,
                              imgsz=imgsz, device=args.device,
-                             crop_fallback_threshold=0)
+                             imgsz_fallback=0,
+                             imgsz_fallback_always=False,
+                             fallback_threshold=0)
         dets = det.detect(frame)
         per_cls = Counter(d.class_name for d in dets)
         per_cls_str = ", ".join(f"{k}={v}" for k, v in
@@ -112,12 +114,13 @@ def main() -> int:
     # operator see whether the fallbacks actually rescued anything
     # compared to the equivalent single-pass rows above.
     print("\nProduction config + layered fallbacks "
-          "(imgsz 800 -> 1280, then top-30% crop @ 1280, "
-          "triggered when dets < 3):")
+          "(always-run imgsz 1280 multi-scale ensemble, "
+          "then top-30% crop @ 1280 only if merged < 3):")
     print("-" * 72)
     fb_det = XocDiaDetector(weights=args.weights, conf=0.25, imgsz=800,
                             device=args.device,
                             imgsz_fallback=1280,
+                            imgsz_fallback_always=True,
                             fallback_threshold=3,
                             crop_fallback_top_pct=0.30)
     fb_dets = fb_det.detect(frame)

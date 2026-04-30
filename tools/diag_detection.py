@@ -89,8 +89,13 @@ def main() -> int:
     print("\nSweep (conf, imgsz) -> total dets / per-class breakdown:")
     print("-" * 72)
     for conf, imgsz in SWEEPS:
+        # crop_fallback_threshold=0 disables the secondary cropped pass
+        # so the sweep here measures raw single-pass YOLO behaviour. A
+        # caller running the production pipeline gets the fallback's
+        # extra recall on top of these numbers.
         det = XocDiaDetector(weights=args.weights, conf=conf,
-                             imgsz=imgsz, device=args.device)
+                             imgsz=imgsz, device=args.device,
+                             crop_fallback_threshold=0)
         dets = det.detect(frame)
         per_cls = Counter(d.class_name for d in dets)
         per_cls_str = ", ".join(f"{k}={v}" for k, v in
@@ -102,8 +107,27 @@ def main() -> int:
             f".diag.c{int(conf*100):02d}_i{imgsz}.png")
         annotate(frame, dets, out_path)
 
+    # Side-by-side: production config WITH the crop-fallback enabled.
+    # This lets the operator see whether the second pass actually
+    # rescued anything compared to the equivalent single-pass row.
+    print("\nProduction config + crop fallback (top 30% trimmed when "
+          "primary < 3 dets):")
+    print("-" * 72)
+    fb_det = XocDiaDetector(weights=args.weights, conf=0.25, imgsz=800,
+                            device=args.device,
+                            crop_fallback_threshold=3,
+                            crop_fallback_top_pct=0.30)
+    fb_dets = fb_det.detect(frame)
+    fb_per_cls = Counter(d.class_name for d in fb_dets)
+    fb_per_cls_str = ", ".join(f"{k}={v}" for k, v in
+                               sorted(fb_per_cls.items())) or "-"
+    print(f"conf=0.25 imgsz= 800  total={len(fb_dets):>3}  "
+          f"per_cls=[{fb_per_cls_str}]  (with fallback)")
+    annotate(frame, fb_dets,
+             frame_path.with_suffix(".diag.c25_i800_fb.png"))
+
     print("\nAnnotated images written next to the input frame "
-          f"(suffix .diag.cXX_iYYYY.png).")
+          f"(suffix .diag.cXX_iYYYY[_fb].png).")
     print("\nInterpretation hints:")
     print("  * If conf=0.40 imgsz=800 returns 0 but conf=0.25 imgsz=1280")
     print("    finds them: lower the live-capture defaults.")

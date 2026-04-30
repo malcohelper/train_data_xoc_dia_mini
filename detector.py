@@ -61,7 +61,20 @@ class Detection:
 
 
 class XocDiaDetector:
-    """Thin wrapper around ``ultralytics.YOLO`` with typed outputs."""
+    """Thin wrapper around ``ultralytics.YOLO`` with typed outputs.
+
+    Crop-fallback recall (``crop_fallback_threshold`` / ``crop_fallback_top_pct``)
+    is a defensive second pass: when the first full-frame inference returns
+    fewer detections than ``crop_fallback_threshold`` we re-run YOLO on the
+    bottom ``1 - crop_fallback_top_pct`` of the frame. Empirically the
+    history-percent overlay that the game UI sometimes paints across the
+    top of the screen confuses the network and zeroes out detections; the
+    crop trims that overlay off and lets the betting panel features win
+    again. Bbox coordinates from the crop are shifted back into the
+    original frame's coordinate space and merged via per-class NMS so
+    callers see one consistent list. Set ``crop_fallback_threshold=0`` to
+    disable.
+    """
 
     def __init__(
         self,
@@ -70,16 +83,22 @@ class XocDiaDetector:
         iou: float = 0.45,
         device: Optional[str] = None,
         imgsz: int = 800,
+        crop_fallback_threshold: int = 3,
+        crop_fallback_top_pct: float = 0.30,
+        crop_fallback_iou: float = 0.5,
     ):
         self.model = YOLO(weights)
         self.conf = conf
         self.iou = iou
         self.device = device
         self.imgsz = imgsz
+        self.crop_fallback_threshold = crop_fallback_threshold
+        self.crop_fallback_top_pct = crop_fallback_top_pct
+        self.crop_fallback_iou = crop_fallback_iou
 
     # ---------- inference ----------
 
-    def detect(self, frame: np.ndarray) -> List[Detection]:
+    def _infer(self, frame: np.ndarray) -> List[Detection]:
         results = self.model(
             frame,
             conf=self.conf,
@@ -107,6 +126,61 @@ class XocDiaDetector:
                 )
             )
         return detections
+
+    @staticmethod
+    def _shift_y(dets: List[Detection], dy: int) -> List[Detection]:
+        for d in dets:
+            x1, y1, x2, y2 = d.bbox
+            d.bbox = (x1, y1 + dy, x2, y2 + dy)
+        return dets
+
+    def _merge_with_nms(
+        self,
+        primary: List[Detection],
+        secondary: List[Detection],
+    ) -> List[Detection]:
+        """Add detections from ``secondary`` that don't overlap with any
+        same-class detection already in ``primary``. When two same-class
+        boxes overlap above ``crop_fallback_iou`` we keep the
+        higher-confidence one."""
+        merged = list(primary)
+        for cand in secondary:
+            best_existing_idx: Optional[int] = None
+            best_iou = 0.0
+            for i, kept in enumerate(merged):
+                if kept.class_id != cand.class_id:
+                    continue
+                iou = kept.iou(cand)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_existing_idx = i
+            if best_existing_idx is None or best_iou < self.crop_fallback_iou:
+                merged.append(cand)
+            elif cand.conf > merged[best_existing_idx].conf:
+                merged[best_existing_idx] = cand
+        return merged
+
+    def detect(self, frame: np.ndarray) -> List[Detection]:
+        primary = self._infer(frame)
+
+        if (
+            self.crop_fallback_threshold <= 0
+            or len(primary) >= self.crop_fallback_threshold
+            or self.crop_fallback_top_pct <= 0
+            or self.crop_fallback_top_pct >= 1
+        ):
+            return primary
+
+        h = frame.shape[0]
+        crop_top = int(h * self.crop_fallback_top_pct)
+        # Defensive guard: if cropping leaves too little of the frame,
+        # YOLO can't make use of it. Skip the fallback in that case.
+        if h - crop_top < 200:
+            return primary
+
+        cropped = frame[crop_top:]
+        crop_dets = self._shift_y(self._infer(cropped), crop_top)
+        return self._merge_with_nms(primary, crop_dets)
 
     def detect_batch(self, frames: Iterable[np.ndarray]) -> List[List[Detection]]:
         return [self.detect(f) for f in frames]

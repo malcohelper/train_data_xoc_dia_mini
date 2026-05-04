@@ -157,10 +157,14 @@ pip install -r requirements.txt
 │   └── labels/{raw,train,val}
 ├── rounds/                   # per-round PNG + JSON snapshots
 ├── analytics/
-│   ├── serve.py              # `python -m analytics.serve` - static HTML +
-│   │                         #   /api/rounds.json endpoint
-│   ├── index.html            # dashboard (Tailwind CDN)
-│   └── app.js                # Chẵn/Lẻ + vị stats + Big Road renderer
+│   ├── serve.py                 # `python -m analytics.serve` - static HTML +
+│   │                            #   /api/rounds.json endpoint
+│   ├── index.html               # dashboard (Tailwind CDN)
+│   ├── index-with-prediction.html  # analytics + 7 heuristic predictors + ensemble UI
+│   ├── app.js                   # Chẵn/Lẻ + vị stats + Big Road renderer
+│   ├── app-with-prediction.js   # polls API + prediction panels + backtest/export hooks
+│   ├── prediction-engine.js     # pure JS: pattern / streak / freq / Markov / hot-cold / time + ensemble
+│   └── prediction-engine.test.js   # `node --test analytics/prediction-engine.test.js`
 └── tools/
     ├── rounds_to_dataset.py          # copy rounds/*.png into dataset/images/raw/
     ├── migrate_labels_15class.py     # one-shot: 17-class -> 15-class label remap
@@ -390,6 +394,8 @@ python -m analytics.serve --rounds-dir ~/captures/rounds --port 8080
 The time-range filter defaults to `[first round, latest round]` and
 follows new rounds automatically. Click `AUTO` (or edit either date)
 to pin a historical window; click again to re-enable follow.
+
+**Prediction view:** open [http://127.0.0.1:8000/index-with-prediction.html](http://127.0.0.1:8000/index-with-prediction.html) (same server). It reuses the same charts and filters, runs seven heuristic predictors (including one that reads `percent` + `bets` from each round JSON when present) plus a weighted ensemble, tracks live exact/chẵn-lẻ hit rates after each new round from `realtime_capture`, supports walk-forward **backtest** on the filtered range, optional browser notifications when confidence and consensus are high, and JSON/CSV export. The predictors are exploratory only: fair rounds are independent, so long-run accuracy should stay near random baselines (~20% exact digit, ~50% parity); use the backtest panel to compare the ensemble to the bundled random and “repeat last outcome” baselines instead of treating high short-run percentages as an edge.
 
 ## Packaging as `XocDia.app` (macOS bundle)
 

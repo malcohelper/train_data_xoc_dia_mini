@@ -80,9 +80,9 @@ class Round:
     started_at: str                                 # ISO timestamp
     percent: Dict[str, Optional[str]] = field(default_factory=dict)
     # Per-area history of every sanitised percent reading observed
-    # during the [46,48] timer window. Resolved into ``percent`` via
-    # majority vote at finalisation. Multi-frame consensus protects us
-    # against a single bad OCR frame in a 2-3 frame window.
+    # throughout the entire betting phase. Resolved into ``percent``
+    # via majority vote at finalisation. Since percent does not change
+    # during a round, more samples = better OCR error protection.
     percent_history: Dict[str, List[str]] = field(default_factory=dict)
     bets: Dict[str, Dict[str, Optional[str]]] = field(
         default_factory=lambda: {k: {"total_bet": None, "total_count": None} for k in BET_TYPES}
@@ -125,6 +125,18 @@ class Round:
             winner = min(tied, key=readings.index)
             self.percent[bet_type] = winner
 
+    def current_percent(self) -> Dict[str, Optional[str]]:
+        """Best-known percent from history so far (majority vote of
+        readings collected up to this point). Used for in-progress saves
+        before ``finalise_percent`` is called at round end."""
+        result: Dict[str, Optional[str]] = {}
+        for bet_type, readings in self.percent_history.items():
+            if not readings:
+                continue
+            counts = Counter(readings)
+            result[bet_type] = counts.most_common(1)[0][0]
+        return result
+
     def to_dict(self) -> Dict[str, object]:
         return {
             "round_id": self.round_id,
@@ -132,6 +144,18 @@ class Round:
             "finalised_at": self.finalised_at,
             "dice_result": self.dice_result,
             "percent": dict(self.percent),
+            "bets": dict(self.bets),
+        }
+
+    def to_dict_in_progress(self) -> Dict[str, object]:
+        """Like ``to_dict`` but uses ``current_percent`` instead of the
+        finalised ``percent`` field. For saving during betting."""
+        return {
+            "round_id": self.round_id,
+            "started_at": self.started_at,
+            "finalised_at": None,
+            "dice_result": None,
+            "percent": self.current_percent(),
             "bets": dict(self.bets),
         }
 
@@ -152,6 +176,7 @@ class RoundTracker:
         # for a separate phase field; adding one tends to drift out of
         # sync with the real transitions.
         self.current: Optional[Round] = None
+        self._current_path: Optional[Path] = None
         self.last_timer: Optional[int] = None
 
     # -- core transitions --
@@ -176,18 +201,15 @@ class RoundTracker:
                 )
             self._start_new_round(state)
 
-        # We're inside an active round -> always refresh bets/counts.
-        # Percent is only captured in the round-start window (timer >= 46)
-        # when the scoreboard has just ticked over for the new round and
-        # is visually stable. ``update_percent`` appends each non-null
-        # reading to ``percent_history`` for the majority-vote in
-        # ``finalise_percent``; the ``timer >= TIMER_NEW_ROUND_THRESHOLD``
-        # guard is what stops it from accumulating reads outside the
-        # window (``update_percent`` itself is no longer idempotent).
+        # We're inside an active round -> refresh bets and percent on
+        # every frame. Percent does not change during a round (it updates
+        # once at result->transition->betting), so capturing throughout
+        # the full betting phase just gives more OCR samples for the
+        # majority vote in ``finalise_percent``.
         if self.current is not None:
             self.current.update_bets(state)
-            if timer is not None and timer >= TIMER_NEW_ROUND_THRESHOLD:
-                self.current.update_percent(state)
+            self.current.update_percent(state)
+            self._save_round_progress()
 
         # Finalise when a dice result appears.
         if state.dice_result is not None and self.current is not None \
@@ -207,41 +229,48 @@ class RoundTracker:
             round_id=now.strftime("%Y%m%d_%H%M%S"),
             started_at=now.isoformat(timespec="seconds"),
         )
-        # NOTE: do NOT call update_percent here. The caller (``ingest``)
-        # already does it for the same frame inside the
-        # ``timer >= TIMER_NEW_ROUND_THRESHOLD`` block. Calling it here
-        # too would double-count the first frame's reading in
-        # ``percent_history``, giving it 2x weight in the majority vote
-        # at finalisation.
+        # Resolve file path once (collision-safe).
+        base = self.rounds_dir / f"{self.current.round_id}.json"
+        if base.exists():
+            i = 1
+            while (self.rounds_dir / f"{self.current.round_id}-{i}.json").exists():
+                i += 1
+            base = self.rounds_dir / f"{self.current.round_id}-{i}.json"
+        self._current_path = base
+        # Log percent at round start (percent is fixed for the whole round).
+        pct_parts = []
+        for bt in self.percent_row_order:
+            b = state.bets.get(bt)
+            val = b.percent if b and b.percent else "-"
+            pct_parts.append(f"{bt} {val}")
+        print(f"[NEW ROUND] {self.current.round_id} | PERCENT: {' | '.join(pct_parts)}")
+        # Save initial JSON so prediction engine can read percent + bets
+        # during the betting phase.
+        self._save_round_progress()
+
+    def _save_round_progress(self) -> None:
+        """Overwrite the in-progress JSON with current bets + best-known
+        percent (dice_result is still null). Called every detect cycle so
+        the prediction engine always has fresh data."""
+        if self.current is None or self._current_path is None:
+            return
+        with open(self._current_path, "w", encoding="utf-8") as f:
+            json.dump(self.current.to_dict_in_progress(), f, indent=2, ensure_ascii=False)
 
     def _finalise_round(self, state: GameState, frame: np.ndarray) -> Round:
         assert self.current is not None
         self.current.dice_result = state.dice_result
         self.current.finalised_at = datetime.now().isoformat(timespec="seconds")
-        # Make sure any late bet updates are captured.
         self.current.update_bets(state)
-        # Collapse the multi-frame percent history into a single value
-        # per area before logging / saving.
         self.current.finalise_percent()
-        self._save_round(self.current, frame)
+        # Final save overwrites the in-progress file with complete data.
+        if self._current_path is not None:
+            with open(self._current_path, "w", encoding="utf-8") as f:
+                json.dump(self.current.to_dict(), f, indent=2, ensure_ascii=False)
         finished = self.current
         self.current = None
+        self._current_path = None
         return finished
-
-    def _save_round(self, rd: Round, frame: np.ndarray) -> None:
-        # JSON-only: skip PNG to keep the realtime loop light. If you ever
-        # want the frame for debugging, call tools/visualize on a captured
-        # dataset image instead.
-        del frame  # intentionally unused
-        base = self.rounds_dir / f"{rd.round_id}.json"
-        # Collision-safe: if two rounds share the second, append -1/-2/...
-        if base.exists():
-            i = 1
-            while (self.rounds_dir / f"{rd.round_id}-{i}.json").exists():
-                i += 1
-            base = self.rounds_dir / f"{rd.round_id}-{i}.json"
-        with open(base, "w", encoding="utf-8") as f:
-            json.dump(rd.to_dict(), f, indent=2, ensure_ascii=False)
 
     # -- presentation --
 
@@ -838,6 +867,16 @@ class RealtimeCapture:
                             f"@({self.monitor['left']},{self.monitor['top']})"
                         )
                         
+                    if self.tracker.current is not None and state.phase == "betting":
+                        t = state.timer_int or 0
+                        bet_parts = []
+                        for bt in self.tracker.percent_row_order:
+                            slot = self.tracker.current.bets.get(bt, {})
+                            tb = slot.get("total_bet") or "-"
+                            tc = slot.get("total_count") or "-"
+                            bet_parts.append(f"{bt}={tb}/{tc}")
+                        print(f"  [t={t:02d}] BETS: {' | '.join(bet_parts)}")
+
                     if finished is not None:
                         print(self.tracker.format_log(finished))
 

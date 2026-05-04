@@ -27,6 +27,7 @@ temp_capture.png
 rounds/
 debug_cells/
 dataset/
+qa_review/
 
 # PyInstaller / py2app build artifacts (BUILD.md describes the build flow)
 build/

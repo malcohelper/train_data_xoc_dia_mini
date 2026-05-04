@@ -155,3 +155,62 @@ rm -rf ~/.paddlex
 Quyền Screen Recording vẫn còn trong System Settings — gỡ thủ công nếu
 cần (System Settings → Privacy & Security → Screen Recording → tìm
 XocDia → trừ icon "−").
+
+## 7. Mô phỏng Backtest trên thư mục `rounds/` (Node.js)
+
+Dùng khi bạn đã có **nhiều file JSON** (ví dụ copy từ
+`~/Documents/XocDia/rounds/` hoặc dùng thư mục `rounds/` trong repo dev).
+Script **không cần `npm install`**, chỉ cần **Node.js 18+** (có sẵn `node`).
+
+### Cách chạy (từ thư mục gốc của project)
+
+```bash
+# Chạy mặc định: đọc ./rounds, burn-in 40, ghi analytics/backtest-report.json
+node analytics/run-backtest-rounds.js
+```
+
+Các tùy chọn thường dùng:
+
+```bash
+# Chỉ định file báo cáo đầu ra
+node analytics/run-backtest-rounds.js --out ./analytics/backtest-report.json
+
+# Đổi số phiên “nạp đà” (mặc định 40; từ phiên 41 trở đi mới tính %)
+node analytics/run-backtest-rounds.js --burn-in 60
+
+# Trỏ sang thư mục JSON khác (vd. bản copy từ máy chơi)
+node analytics/run-backtest-rounds.js --rounds /đường/dẫn/tới/rounds
+
+# Thử nghiệm: tăng β (đè bẹp thuật toán yếu mạnh hơn)
+node analytics/run-backtest-rounds.js --beta 4
+
+# Trả H về dạng có trộn cả tỉ lệ đúng “vị” (không chỉ Chẵn/Lẻ)
+node analytics/run-backtest-rounds.js --hit-blend-exact 0.55
+```
+
+### Script làm gì (tóm tắt)
+
+1. **Đọc** mọi `*.json` trong thư mục, **sắp xếp theo tên file** (định dạng
+   `YYYYMMDD_HHmmss` → thứ tự đúng thời gian).
+2. **Chuyển** mỗi file sang `RoundItem` (trường `red`, `type`, `time`,
+   `percent`, `bets`, …) giống chuẩn `prediction-engine.js`.
+3. **Tạm thời** chỉnh engine cho lần chạy này: mặc định **`HIT_BLEND_EXACT = 0`**
+   (điểm H trong ensemble chỉ dựa **Chẵn/Lẻ**, không nhấn “đúng vị”), và
+   **`BETA = 2`**. Sau khi xong, giá trị trong `prediction-engine.js` **được khôi phục** —
+   không làm bẩn cấu hình khi bạn mở analytics trên trình duyệt.
+4. Gọi **walk-forward** `runBacktest` + **`runBaselines`** (random / lặp lại cửa trước).
+5. In kết quả ra **terminal** và ghi **JSON** (động / tĩnh, `byAlgo`, file lỗi nếu có).
+
+### Lưu ý quan trọng
+
+- **Không phải lời khuyên cờ bạc.** Backtest chỉ đo mô hình heuristic trên
+  dữ liệu đã ghi; quá khứ **không** đảm bảo tương lai.
+- **Chất lượng dữ liệu:** file thiếu `dice_result` hoặc sai khóa sẽ vào mục
+  `skipped` trong báo cáo — nên kiểm tra nếu số “bỏ qua” lớn.
+- **Cùng một bộ rounds:** so sánh Động vs Tĩnh và các TT mới có ý nghĩa khi
+  mọi lần chạy dùng **cùng thư mục và cùng thứ tự** file.
+- **Thời gian chạy:** vài trăm đến vài nghìn file có thể mất vài giây đến vài
+  chục giây tùy máy (mỗi bước gọi lại ensemble).
+- **Tham số `--beta` / `--hit-blend-exact`:** chỉ áp trong **phiên chạy script**;
+  nếu muốn đổi mặc định cho UI, phải sửa **DYNAMIC_ENSEMBLE** trong
+  `analytics/prediction-engine.js` riêng.

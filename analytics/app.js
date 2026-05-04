@@ -31,7 +31,13 @@
   };
 
   // Order matches mockup: 4 TRẮNG, 3T1Đ, 2T2Đ, 3Đ1T, 4 ĐỎ (red ascending).
-  const VI_LABELS = ["4 TRẮNG", "3 TRẮNG 1 ĐỎ", "2 TRẮNG 2 ĐỎ", "3 ĐỎ 1 TRẮNG", "4 ĐỎ"];
+  const VI_LABELS = [
+    "4 TRẮNG",
+    "3 TRẮNG 1 ĐỎ",
+    "2 TRẮNG 2 ĐỎ",
+    "3 ĐỎ 1 TRẮNG",
+    "4 ĐỎ",
+  ];
 
   /** @type {Array<{red:number,type:"chan"|"le",time:Date,round_id:string}>} */
   let masterData = [];
@@ -288,7 +294,7 @@
       const suffix = newlyAdded ? ` · +${newlyAdded} mới` : "";
       setStatus(
         `Cập nhật ${when} · ${masterData.length} round tổng${suffix}`,
-        true
+        true,
       );
     } catch (err) {
       lastFetchOk = false;
@@ -325,7 +331,9 @@
   // Typing in either date input also disables auto-follow so the user
   // can pin a historical window without it being yanked away every 3 s.
   ["fromDate", "toDate"].forEach((id) => {
-    document.getElementById(id).addEventListener("change", () => setFollow(false));
+    document
+      .getElementById(id)
+      .addEventListener("change", () => setFollow(false));
   });
 
   // Initial load + poll loop.

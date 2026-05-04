@@ -194,12 +194,19 @@
       <div class="flex flex-col gap-1">
         <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bộ thuật toán</label>
         <select id="predictorPreset"
-          class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-amber-500 text-white font-mono min-w-[280px]">
-          <option value="slim-6">Slim-6 (mặc định, ~59% type)</option>
-          <option value="lean-3">Lean-3 — pattern + markov + markov2 (~60%)</option>
-          <option value="duo">Duo — markov + pattern (~60% / 67% với gate)</option>
-          <option value="markov-solo">Markov solo (~62% type, 100% coverage)</option>
-          <option value="baseline-11">Baseline 11 algo cũ (~55% type)</option>
+          class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-amber-500 text-white font-mono min-w-[320px]">
+          <optgroup label="Grid-search tuned (best on backtest)">
+            <option value="duo-tuned">Duo-tuned — markov + pattern · ~68% CL ★</option>
+            <option value="slim-6-tuned">Slim-6-tuned — 6 algos · ~63% CL</option>
+            <option value="lean-3-tuned">Lean-3-tuned — pattern + markov + markov2 · ~62% CL</option>
+          </optgroup>
+          <optgroup label="Default hyperparams">
+            <option value="slim-6">Slim-6 — 6 algos (~59%)</option>
+            <option value="lean-3">Lean-3 — pattern + markov + markov2 (~60%)</option>
+            <option value="duo">Duo — markov + pattern (~60%)</option>
+            <option value="markov-solo">Markov solo (~62%)</option>
+            <option value="baseline-11">Baseline 11 algo cũ (~55%)</option>
+          </optgroup>
         </select>
       </div>
       <div class="flex flex-col gap-1 min-w-[260px]">

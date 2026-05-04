@@ -212,13 +212,23 @@ function evalDynamic(predictions, alpha, beta, topK, hitWindow, blendExact) {
 function main() {
   let roundsDir = path.join(__dirname, "..", "rounds");
   let topN = 15;
+  let predictors = null;
   for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--rounds" && process.argv[i + 1]) roundsDir = path.resolve(process.argv[++i]);
     if (process.argv[i] === "--top" && process.argv[i + 1]) topN = parseInt(process.argv[++i], 10);
+    if (process.argv[i] === "--predictors" && process.argv[i + 1]) {
+      predictors = process.argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+
+  if (predictors && predictors.length) {
+    try { engine.setActivePredictors(predictors); }
+    catch (e) { console.error(`--predictors error: ${e.message}`); process.exit(2); }
   }
 
   const history = loadRounds(roundsDir);
   console.log(`Loaded ${history.length} rounds from ${roundsDir}`);
+  console.log(`Active predictors (${engine.ALGO_IDS.length}): ${engine.ALGO_IDS.join(", ")}`);
 
   const burnIn = 1;
   console.log("Pre-computing predictions...");

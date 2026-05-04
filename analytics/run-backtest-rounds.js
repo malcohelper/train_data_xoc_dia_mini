@@ -89,6 +89,7 @@ function parseArgs(argv) {
     hitBlendExact: DE.HIT_BLEND_EXACT,
     beta: DE.BETA,
     detail: false,
+    predictors: null,
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -108,6 +109,11 @@ function parseArgs(argv) {
         : 0;
     } else if (a === "--detail") {
       out.detail = true;
+    } else if (a === "--predictors" && argv[i + 1]) {
+      out.predictors = argv[++i]
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     }
   }
   return out;
@@ -289,11 +295,21 @@ function main() {
   const opts = parseArgs(process.argv);
   const { merged, skipped, fileNames } = loadMergedHistory(opts.roundsDir);
 
+  if (opts.predictors && opts.predictors.length) {
+    try {
+      engine.setActivePredictors(opts.predictors);
+    } catch (e) {
+      console.error(`--predictors error: ${e.message}`);
+      process.exit(2);
+    }
+  }
+
   console.log(`=== Backtest walk-forward (${engine.ALGO_IDS.length} thuật toán) ===\n`);
   console.log(`Thư mục:    ${opts.roundsDir}`);
   console.log(`File .json: ${fileNames.length} · Hợp lệ: ${merged.length} · Bỏ qua: ${skipped.length}`);
   console.log(`Burn-in:    ${opts.burnIn} (bỏ qua ${opts.burnIn} phiên đầu)`);
   console.log(`BETA=${opts.beta} · HIT_BLEND_EXACT=${opts.hitBlendExact}`);
+  console.log(`Active:     ${engine.ALGO_IDS.join(", ")}`);
   if (skipped.length && skipped.length <= 15) {
     skipped.forEach((s) => console.log(`  - ${s.file}: ${s.reason}`));
   } else if (skipped.length) {

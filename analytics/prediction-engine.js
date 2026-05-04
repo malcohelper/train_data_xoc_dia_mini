@@ -1215,6 +1215,52 @@
     bayesianPrior,
   ];
 
+  // Backups of the full predictor set so callers can subset/restore at runtime
+  // without re-requiring the module. Keep PREDICTORS / ALGO_IDS stable
+  // references so closures captured before mutation still observe updates.
+  const _ALL_PREDICTORS = PREDICTORS.slice();
+  const _ALL_ALGO_IDS = ALGO_IDS.slice();
+  const _ID_TO_INDEX = {};
+  _ALL_ALGO_IDS.forEach((id, i) => {
+    _ID_TO_INDEX[id] = i;
+  });
+
+  /**
+   * Activate a subset of predictors by id. Mutates PREDICTORS and ALGO_IDS
+   * in place so all downstream code (calculateRecentHitRates, runBacktest,
+   * grid-search precompute, ...) automatically uses the slim set.
+   *
+   * Pass null/undefined/[] to restore the full set.
+   *
+   * @param {string[] | null} ids - canonical algo ids, e.g. ["pattern","markov"]
+   * @returns {{active: string[]}}
+   */
+  function setActivePredictors(ids) {
+    const want = ids && ids.length ? ids.slice() : _ALL_ALGO_IDS.slice();
+    for (const id of want) {
+      if (_ID_TO_INDEX[id] === undefined) {
+        throw new Error(
+          `setActivePredictors: unknown id "${id}". Valid: ${_ALL_ALGO_IDS.join(",")}`,
+        );
+      }
+    }
+    PREDICTORS.length = 0;
+    ALGO_IDS.length = 0;
+    for (const id of want) {
+      PREDICTORS.push(_ALL_PREDICTORS[_ID_TO_INDEX[id]]);
+      ALGO_IDS.push(id);
+    }
+    return { active: ALGO_IDS.slice() };
+  }
+
+  function getActivePredictors() {
+    return ALGO_IDS.slice();
+  }
+
+  function resetActivePredictors() {
+    return setActivePredictors(_ALL_ALGO_IDS);
+  }
+
   /**
    * Ensemble động: W_i ≈ [ α·C_i + (1-α)·H_i ]^β
    * H_i = γ·(trúng vị) + (1-γ)·(trúng chẵn/lẻ).
@@ -1763,6 +1809,10 @@
     DYNAMIC_ENSEMBLE,
     calculateRecentHitRates,
     detectRegime,
+    setActivePredictors,
+    getActivePredictors,
+    resetActivePredictors,
+    ALL_ALGO_IDS: _ALL_ALGO_IDS.slice(),
   };
 
   global.XocDiaPrediction = XocDiaPrediction;

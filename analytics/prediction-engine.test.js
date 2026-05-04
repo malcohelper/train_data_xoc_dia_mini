@@ -256,3 +256,38 @@ test("empty history gives low-confidence ensemble", () => {
   const e = engine.ensemblePredict([]);
   assert.ok(e.confidence < 0.35);
 });
+
+test("setActivePredictors filters PREDICTORS and ALGO_IDS in place", () => {
+  const fullIds = engine.ALL_ALGO_IDS;
+  assert.ok(fullIds.length >= 11);
+  try {
+    const r = engine.setActivePredictors(["pattern", "markov"]);
+    assert.deepEqual(r.active, ["pattern", "markov"]);
+    assert.deepEqual(engine.ALGO_IDS, ["pattern", "markov"]);
+    assert.equal(engine.PREDICTORS.length, 2);
+    // Ensemble respects the slim set
+    const h = fromReds([0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
+    const e = engine.ensemblePredict(h);
+    assert.equal(e.algorithms.length, 2);
+    assert.deepEqual(
+      e.algorithms.map((a) => a.id).sort(),
+      ["markov", "pattern"],
+    );
+  } finally {
+    engine.resetActivePredictors();
+  }
+  assert.deepEqual(engine.ALGO_IDS, fullIds);
+});
+
+test("setActivePredictors throws on unknown id", () => {
+  assert.throws(() => engine.setActivePredictors(["bogusAlgo"]), /Unknown id|unknown id/);
+  // State unchanged after failed call
+  assert.equal(engine.ALGO_IDS.length, engine.ALL_ALGO_IDS.length);
+});
+
+test("resetActivePredictors restores full set", () => {
+  engine.setActivePredictors(["markov"]);
+  assert.equal(engine.ALGO_IDS.length, 1);
+  engine.resetActivePredictors();
+  assert.deepEqual(engine.ALGO_IDS, engine.ALL_ALGO_IDS);
+});

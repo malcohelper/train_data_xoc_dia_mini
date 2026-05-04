@@ -213,9 +213,14 @@ function main() {
   let roundsDir = path.join(__dirname, "..", "rounds");
   let topN = 15;
   let predictors = null;
+  let burnIn = 1;
   for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--rounds" && process.argv[i + 1]) roundsDir = path.resolve(process.argv[++i]);
     if (process.argv[i] === "--top" && process.argv[i + 1]) topN = parseInt(process.argv[++i], 10);
+    if (process.argv[i] === "--burn-in" && process.argv[i + 1]) {
+      const v = parseInt(process.argv[++i], 10);
+      if (Number.isFinite(v) && v >= 1) burnIn = v;
+    }
     if (process.argv[i] === "--predictors" && process.argv[i + 1]) {
       predictors = process.argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
     }
@@ -229,8 +234,12 @@ function main() {
   const history = loadRounds(roundsDir);
   console.log(`Loaded ${history.length} rounds from ${roundsDir}`);
   console.log(`Active predictors (${engine.ALGO_IDS.length}): ${engine.ALGO_IDS.join(", ")}`);
-
-  const burnIn = 1;
+  if (burnIn >= history.length) {
+    console.error(`--burn-in ${burnIn} >= ${history.length} rounds, nothing to test`);
+    process.exit(2);
+  }
+  const testN = history.length - burnIn;
+  console.log(`Burn-in: ${burnIn}  ·  Test rounds: ${testN}`);
   console.log("Pre-computing predictions...");
   const predictions = precomputePredictions(history, burnIn);
   console.log(`Pre-computed ${predictions.length} prediction steps\n`);

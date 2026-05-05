@@ -29,24 +29,30 @@
   //
   // NOTE: do NOT trust analytics/grid-search.js absolute numbers; it
   // re-implements ensemble weighting and overstates CL by ~3-7pp
-  // relative to engine.ensemblePredict. Use compare-ensembles for
-  // production-relevant figures.
+  // relative to engine.ensemblePredict. Tuned presets that lived here
+  // briefly (duo-tuned, slim-6-tuned, lean-3-tuned) were rolled back
+  // because their hyperparameters didn't reproduce in engine code.
+  //
+  // Each preset is { ids: string[]|null, de?: object } where `de`
+  // overrides keys on engine.DYNAMIC_ENSEMBLE while the preset is
+  // active. `ids=null` means use the full 11-algo set. No production
+  // preset currently sets `de`; the field is kept for future use.
   const PREDICTOR_PRESETS = {
-    duo: ["markov", "pattern"],
-    "markov-solo": ["markov"],
-    "lean-3": ["pattern", "markov", "markov2"],
-    "slim-6": [
-      "pattern",
-      "markov",
-      "markov2",
-      "time",
-      "crowd",
-      "parityRepeat",
-    ],
-    "baseline-11": null /* full set */,
+    duo: { ids: ["markov", "pattern"] },
+    "markov-solo": { ids: ["markov"] },
+    "lean-3": { ids: ["pattern", "markov", "markov2"] },
+    "slim-6": {
+      ids: ["pattern", "markov", "markov2", "time", "crowd", "parityRepeat"],
+    },
+    "baseline-11": { ids: null /* full set */ },
   };
   const DEFAULT_PRESET = "duo";
   const DEFAULT_THRESHOLD = 0.5;
+
+  // Snapshot of original DYNAMIC_ENSEMBLE values, captured the first
+  // time applyPredictorPreset() runs so we can restore defaults when
+  // switching to a preset that doesn't override a key.
+  let _DE_DEFAULTS = null;
 
   function getPredictorPreset() {
     try {
@@ -59,10 +65,31 @@
   }
 
   function applyPredictorPreset(name) {
-    const ids = PREDICTOR_PRESETS[name] || null;
+    const cfg = PREDICTOR_PRESETS[name];
+    if (!cfg) return;
     const P = window.XocDiaPrediction;
     if (!P || typeof P.setActivePredictors !== "function") return;
-    P.setActivePredictors(ids);
+    P.setActivePredictors(cfg.ids || null);
+    const DE = P.DYNAMIC_ENSEMBLE;
+    if (DE) {
+      if (_DE_DEFAULTS === null) {
+        _DE_DEFAULTS = { ...DE };
+      }
+      // Reset every overridable key to default, then apply preset's
+      // overrides. Only touch keys we know about so we don't clobber
+      // keys added later in the engine.
+      const KEYS = [
+        "ALPHA", "BETA", "TOP_K",
+        "HIT_WINDOW", "HIT_WINDOW_SHORT", "HIT_WINDOW_LONG",
+        "HIT_MULTI_PHI", "HIT_BLEND_EXACT",
+        "H_BASELINE", "H_HIT_SHRINK", "PARITY_HARD_CUTOFF",
+      ];
+      for (const k of KEYS) {
+        if (k in _DE_DEFAULTS) DE[k] = _DE_DEFAULTS[k];
+      }
+      const overrides = cfg.de || {};
+      for (const k of Object.keys(overrides)) DE[k] = overrides[k];
+    }
   }
 
   function setPredictorPreset(name) {

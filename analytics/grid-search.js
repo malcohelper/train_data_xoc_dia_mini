@@ -52,11 +52,12 @@ function loadRounds(roundsDir) {
  * Pre-compute all predictor outputs for every walk-forward step.
  * Returns: predictions[t] = { algos: [{id, predictedRed, confidence, parityConfidence?}], actual: {red, type} }
  */
-function precomputePredictions(history, burnIn) {
+function precomputePredictions(history, burnIn, historyWindow) {
   const h = engine.normalizeHistory(history);
   const predictions = [];
   for (let t = burnIn; t < h.length; t++) {
-    const past = h.slice(0, t);
+    const startIdx = historyWindow > 0 ? Math.max(0, t - historyWindow) : 0;
+    const past = h.slice(startIdx, t);
     const actual = h[t];
     const currentRound = { percent: actual.percent || null, bets: actual.bets || null };
     const algos = engine.PREDICTORS.map((fn) => fn(past, currentRound));
@@ -214,12 +215,17 @@ function main() {
   let topN = 15;
   let predictors = null;
   let burnIn = 1;
+  let historyWindow = 0; // 0 = unbounded, >0 = sliding window of N rounds
   for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--rounds" && process.argv[i + 1]) roundsDir = path.resolve(process.argv[++i]);
     if (process.argv[i] === "--top" && process.argv[i + 1]) topN = parseInt(process.argv[++i], 10);
     if (process.argv[i] === "--burn-in" && process.argv[i + 1]) {
       const v = parseInt(process.argv[++i], 10);
       if (Number.isFinite(v) && v >= 1) burnIn = v;
+    }
+    if (process.argv[i] === "--history-window" && process.argv[i + 1]) {
+      const v = parseInt(process.argv[++i], 10);
+      historyWindow = Number.isFinite(v) && v > 0 ? v : 0;
     }
     if (process.argv[i] === "--predictors" && process.argv[i + 1]) {
       predictors = process.argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
@@ -239,9 +245,10 @@ function main() {
     process.exit(2);
   }
   const testN = history.length - burnIn;
-  console.log(`Burn-in: ${burnIn}  ·  Test rounds: ${testN}`);
+  const hwLabel = historyWindow > 0 ? `${historyWindow} rounds (sliding)` : "all (unbounded)";
+  console.log(`Burn-in: ${burnIn}  ·  Test rounds: ${testN}  ·  History window: ${hwLabel}`);
   console.log("Pre-computing predictions...");
-  const predictions = precomputePredictions(history, burnIn);
+  const predictions = precomputePredictions(history, burnIn, historyWindow);
   console.log(`Pre-computed ${predictions.length} prediction steps\n`);
 
   console.log("=== STATIC MODE SEARCH (no hit rates) ===\n");

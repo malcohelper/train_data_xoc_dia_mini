@@ -12,12 +12,29 @@
   const PREDICTOR_PRESET_LS = "xocdia_predictor_preset_v1";
   const SELECTIVE_THRESHOLD_LS = "xocdia_selective_threshold_v1";
 
-  // Backtest-validated subsets of the 11 predictors. Empirically, the
+  // Backtest-validated subsets of the 11 predictors. Empirically the
   // dynamic ensemble was being dragged down by 5 weak algos
   // (streak/regression/cauPattern/balance/bayesian, all ≤52% type accuracy
-  // on prior backtest) — slimming the ensemble lifts dynamic CL from
-  // ~55% to ~60-62%. See analytics/compare-ensembles.js.
+  // on 894-round backtest). Slimming the ensemble + favouring markov +
+  // pattern lifts engine.ensemblePredict CL%:
+  //
+  //   baseline-11        : 55.32% type
+  //   slim-6             : 59.57%
+  //   lean-3 / duo       : 60.64%
+  //   markov-solo        : 61.70%
+  //
+  // 'duo' (markov + pattern) hits 69% type at threshold 0.50 (62%
+  // coverage) — best operational config measured by
+  // analytics/compare-ensembles.js on 94 test rounds.
+  //
+  // NOTE: do NOT trust analytics/grid-search.js absolute numbers; it
+  // re-implements ensemble weighting and overstates CL by ~3-7pp
+  // relative to engine.ensemblePredict. Use compare-ensembles for
+  // production-relevant figures.
   const PREDICTOR_PRESETS = {
+    duo: ["markov", "pattern"],
+    "markov-solo": ["markov"],
+    "lean-3": ["pattern", "markov", "markov2"],
     "slim-6": [
       "pattern",
       "markov",
@@ -26,12 +43,9 @@
       "crowd",
       "parityRepeat",
     ],
-    "lean-3": ["pattern", "markov", "markov2"],
-    duo: ["markov", "pattern"],
-    "markov-solo": ["markov"],
     "baseline-11": null /* full set */,
   };
-  const DEFAULT_PRESET = "slim-6";
+  const DEFAULT_PRESET = "duo";
   const DEFAULT_THRESHOLD = 0.5;
 
   function getPredictorPreset() {

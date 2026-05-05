@@ -12,51 +12,41 @@
   const PREDICTOR_PRESET_LS = "xocdia_predictor_preset_v1";
   const SELECTIVE_THRESHOLD_LS = "xocdia_selective_threshold_v1";
 
-  // Backtest-validated subsets of the 11 predictors plus per-subset
-  // hyperparameter tuning. Empirically the dynamic ensemble was being
-  // dragged down by 5 weak algos (streak/regression/cauPattern/balance/
-  // bayesian, all ≤52% type on prior backtest); slimming + grid-search-
-  // tuned hyperparams lifts dynamic CL from ~55% (baseline-11 default)
-  // to 68% (duo-tuned). See analytics/compare-ensembles.js +
-  // analytics/grid-search.js.
+  // Backtest-validated subsets of the 11 predictors. Empirically the
+  // dynamic ensemble was being dragged down by 5 weak algos
+  // (streak/regression/cauPattern/balance/bayesian, all ≤52% type accuracy
+  // on 894-round backtest). Slimming the ensemble + favouring markov +
+  // pattern lifts engine.ensemblePredict CL%:
+  //
+  //   baseline-11        : 55.32% type
+  //   slim-6             : 59.57%
+  //   lean-3 / duo       : 60.64%
+  //   markov-solo        : 61.70%
+  //
+  // 'duo' (markov + pattern) hits 69% type at threshold 0.50 (62%
+  // coverage) — best operational config measured by
+  // analytics/compare-ensembles.js on 94 test rounds.
+  //
+  // NOTE: do NOT trust analytics/grid-search.js absolute numbers; it
+  // re-implements ensemble weighting and overstates CL by ~3-7pp
+  // relative to engine.ensemblePredict. Tuned presets that lived here
+  // briefly (duo-tuned, slim-6-tuned, lean-3-tuned) were rolled back
+  // because their hyperparameters didn't reproduce in engine code.
   //
   // Each preset is { ids: string[]|null, de?: object } where `de`
   // overrides keys on engine.DYNAMIC_ENSEMBLE while the preset is
-  // active. `ids=null` means use the full 11-algo set.
+  // active. `ids=null` means use the full 11-algo set. No production
+  // preset currently sets `de`; the field is kept for future use.
   const PREDICTOR_PRESETS = {
-    "duo-tuned": {
-      ids: ["markov", "pattern"],
-      de: {
-        ALPHA: 0.45, BETA: 1.5, TOP_K: 6,
-        HIT_WINDOW_SHORT: 15, HIT_WINDOW_LONG: 15, HIT_MULTI_PHI: 1,
-        HIT_BLEND_EXACT: 0.85,
-      },
-    },
-    "slim-6-tuned": {
-      ids: ["pattern", "markov", "markov2", "time", "crowd", "parityRepeat"],
-      de: {
-        ALPHA: 0.3, BETA: 3, TOP_K: 6,
-        HIT_WINDOW_SHORT: 20, HIT_WINDOW_LONG: 20, HIT_MULTI_PHI: 1,
-        HIT_BLEND_EXACT: 0.85,
-      },
-    },
-    "lean-3-tuned": {
-      ids: ["pattern", "markov", "markov2"],
-      de: {
-        ALPHA: 0.85, BETA: 5, TOP_K: 6,
-        HIT_WINDOW_SHORT: 30, HIT_WINDOW_LONG: 30, HIT_MULTI_PHI: 1,
-        HIT_BLEND_EXACT: 0.85,
-      },
-    },
+    duo: { ids: ["markov", "pattern"] },
+    "markov-solo": { ids: ["markov"] },
+    "lean-3": { ids: ["pattern", "markov", "markov2"] },
     "slim-6": {
       ids: ["pattern", "markov", "markov2", "time", "crowd", "parityRepeat"],
     },
-    "lean-3": { ids: ["pattern", "markov", "markov2"] },
-    duo: { ids: ["markov", "pattern"] },
-    "markov-solo": { ids: ["markov"] },
-    "baseline-11": { ids: null },
+    "baseline-11": { ids: null /* full set */ },
   };
-  const DEFAULT_PRESET = "duo-tuned";
+  const DEFAULT_PRESET = "duo";
   const DEFAULT_THRESHOLD = 0.5;
 
   // Snapshot of original DYNAMIC_ENSEMBLE values, captured the first

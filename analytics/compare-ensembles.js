@@ -206,31 +206,13 @@ function buildConfigs() {
       predictors: ["pattern","markov","markov2","time","crowd","parityRepeat"],
       de: { TOP_K: 6, BETA: 2.5, HIT_BLEND_EXACT: 0.85 } },
 
-    // === Grid-search tuned variants (best CL% from analytics/grid-search.js
-    // run on burn-in 800, n=94 test rounds). Per-subset hyperparams that
-    // beat the default tuning by 1-7pp on the same test set. See PR notes
-    // for details + overfitting caveat. ===
-    { name: "duo-tuned: a=0.45 b=1.5 hw=15 blend=0.85",
-      predictors: ["markov","pattern"],
-      de: {
-        ALPHA: 0.45, BETA: 1.5, TOP_K: 6,
-        HIT_WINDOW_SHORT: 15, HIT_WINDOW_LONG: 15, HIT_MULTI_PHI: 1,
-        HIT_BLEND_EXACT: 0.85,
-      } },
-    { name: "lean-3-tuned: a=0.85 b=5 hw=30 blend=0.85",
-      predictors: ["pattern","markov","markov2"],
-      de: {
-        ALPHA: 0.85, BETA: 5, TOP_K: 6,
-        HIT_WINDOW_SHORT: 30, HIT_WINDOW_LONG: 30, HIT_MULTI_PHI: 1,
-        HIT_BLEND_EXACT: 0.85,
-      } },
-    { name: "slim-6-tuned: a=0.30 b=3 hw=20 blend=0.85",
-      predictors: ["pattern","markov","markov2","time","crowd","parityRepeat"],
-      de: {
-        ALPHA: 0.3, BETA: 3, TOP_K: 6,
-        HIT_WINDOW_SHORT: 20, HIT_WINDOW_LONG: 20, HIT_MULTI_PHI: 1,
-        HIT_BLEND_EXACT: 0.85,
-      } },
+    // NOTE: Tuned variants (duo-tuned, slim-6-tuned, lean-3-tuned) were
+    // removed after verification showed they only deliver +1pp over their
+    // default-hyperparam siblings when measured through engine.ensemblePredict.
+    // The 3-7pp gap previously claimed came from analytics/grid-search.js
+    // using a hand-rolled evalDynamic that diverges from the engine
+    // (no regime boost, no parity weight boost, different hit-rate window
+    // source). See analytics/grid-search.js preamble for details.
   ];
 }
 

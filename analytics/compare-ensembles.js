@@ -65,7 +65,7 @@ function loadRounds(roundsDir) {
   return { merged, skipped, fileCount: names.length };
 }
 
-function runConfig(history, burnIn, cfg) {
+function runConfig(history, burnIn, cfg, historyWindow) {
   // Apply ensemble overrides
   const DE = engine.DYNAMIC_ENSEMBLE;
   const prev = {};
@@ -83,7 +83,12 @@ function runConfig(history, burnIn, cfg) {
   const stepsLite = [];
 
   for (let t = burnIn; t < normalized.length; t++) {
-    const past = normalized.slice(0, t);
+    // historyWindow caps how many past rounds the predictors see for the
+    // walk-forward step at index t. null/0 means "unbounded" (use full
+    // history before t). With a positive cap, we slide a window of size N
+    // ending at t-1 — this is the non-stationarity-aware mode.
+    const startIdx = historyWindow > 0 ? Math.max(0, t - historyWindow) : 0;
+    const past = normalized.slice(startIdx, t);
     const actual = normalized[t];
     const currentRound = { percent: actual.percent || null, bets: actual.bets || null };
     const ensDyn = engine.ensemblePredict(past, { currentRound });
@@ -151,6 +156,7 @@ function parseArgs(argv) {
     burnIn: 1,
     outPath: null,
     only: null,
+    historyWindow: 0, // 0 = unbounded, >0 = sliding window of N rounds
   };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
@@ -158,6 +164,10 @@ function parseArgs(argv) {
     else if (a === "--burn-in" && argv[i + 1]) out.burnIn = Math.max(0, parseInt(argv[++i], 10) || 1);
     else if (a === "--out" && argv[i + 1]) out.outPath = path.resolve(argv[++i]);
     else if (a === "--only" && argv[i + 1]) out.only = argv[++i].split(",").map((s) => s.trim());
+    else if (a === "--history-window" && argv[i + 1]) {
+      const v = parseInt(argv[++i], 10);
+      out.historyWindow = Number.isFinite(v) && v > 0 ? v : 0;
+    }
   }
   return out;
 }
@@ -206,6 +216,25 @@ function buildConfigs() {
       predictors: ["pattern","markov","markov2","time","crowd","parityRepeat"],
       de: { TOP_K: 6, BETA: 2.5, HIT_BLEND_EXACT: 0.85 } },
 
+    // === Markov-decay sweep ===
+    // λ controls how fast old transitions are forgotten. λ=1.0 = no
+    // decay (full history equally weighted, "stationary" assumption);
+    // λ=0.98 = ~34-round half-life (default, mild decay); λ=0.95 = ~14-
+    // round half-life (aggressive recency bias).
+    //
+    // Empirically: if game is non-stationary, lower λ should win. If
+    // game is stationary, λ=1.0 should win. Use these to test which
+    // regime the dataset lives in.
+    { name: "duo + markov λ=1.00 (no decay)",
+      predictors: ["markov","pattern"],
+      de: { TOP_K: 2, MARKOV_DECAY: 1.0 } },
+    { name: "duo + markov λ=0.98 (default)",
+      predictors: ["markov","pattern"],
+      de: { TOP_K: 2, MARKOV_DECAY: 0.98 } },
+    { name: "duo + markov λ=0.95 (aggressive)",
+      predictors: ["markov","pattern"],
+      de: { TOP_K: 2, MARKOV_DECAY: 0.95 } },
+
     // NOTE: Tuned variants (duo-tuned, slim-6-tuned, lean-3-tuned) were
     // removed after verification showed they only deliver +1pp over their
     // default-hyperparam siblings when measured through engine.ensemblePredict.
@@ -226,7 +255,8 @@ function main() {
     console.error(`Cần > burnIn (${opts.burnIn}) phiên hợp lệ; hiện ${merged.length}.`);
     process.exit(1);
   }
-  console.log(`Burn-in: ${opts.burnIn}  ·  Test rounds: ${merged.length - opts.burnIn}\n`);
+  const hwLabel = opts.historyWindow > 0 ? `${opts.historyWindow} rounds (sliding)` : "all (unbounded)";
+  console.log(`Burn-in: ${opts.burnIn}  ·  Test rounds: ${merged.length - opts.burnIn}  ·  History window: ${hwLabel}\n`);
 
   const allCfgs = buildConfigs();
   const cfgs = opts.only ? allCfgs.filter((c) => opts.only.some((o) => c.name.includes(o))) : allCfgs;
@@ -235,7 +265,7 @@ function main() {
   for (const cfg of cfgs) {
     const t0 = Date.now();
     process.stdout.write(`[${results.length + 1}/${cfgs.length}] ${cfg.name} ...`);
-    const r = runConfig(merged, opts.burnIn, cfg);
+    const r = runConfig(merged, opts.burnIn, cfg, opts.historyWindow);
     r.elapsedSec = ((Date.now() - t0) / 1000).toFixed(1);
     results.push(r);
     process.stdout.write(`  done in ${r.elapsedSec}s\n`);
@@ -284,6 +314,7 @@ function main() {
       generatedAt: new Date().toISOString(),
       roundsDir: opts.roundsDir,
       burnIn: opts.burnIn,
+      historyWindow: opts.historyWindow || null,
       mergedCount: merged.length,
       results,
       bestByDynamicTypePct: best.name,

@@ -373,7 +373,19 @@
     return { id: "frequency", name, predictedRed, confidence, reason };
   }
 
-  const MARKOV_DECAY = 0.98;
+  // Default markov transition decay (λ in 0..1). 1.0 = no decay (uniform
+  // weighting); 0.98 = ~34-round half-life; 0.95 = ~14-round half-life.
+  // Used by markovPredictor + markov2Predictor when DYNAMIC_ENSEMBLE
+  // doesn't override.
+  const MARKOV_DECAY_DEFAULT = 0.98;
+
+  function getMarkovDecay() {
+    const de = typeof DYNAMIC_ENSEMBLE !== "undefined" ? DYNAMIC_ENSEMBLE : null;
+    if (de && Number.isFinite(de.MARKOV_DECAY)) {
+      return Math.max(0.5, Math.min(1, de.MARKOV_DECAY));
+    }
+    return MARKOV_DECAY_DEFAULT;
+  }
 
   function markovPredictor(history) {
     const name = "Markov Chain";
@@ -390,11 +402,12 @@
       };
     }
     const last = reds[n - 1];
+    const lambda = getMarkovDecay();
     const counts = {};
     for (let r = 0; r <= 4; r++) counts[r] = 0.2;
     for (let i = 0; i < n - 1; i++) {
       if (reds[i] === last) {
-        const w = Math.pow(MARKOV_DECAY, n - 2 - i);
+        const w = Math.pow(lambda, n - 2 - i);
         counts[reds[i + 1]] += w;
       }
     }
@@ -410,7 +423,7 @@
     }
     const confidence = Math.min(0.95, 0.25 + bestP * 1.1);
     const parityConfidence = Math.min(0.85, confidence * 0.9);
-    const reason = `Sau mặt ${last}, Markov decay (λ=${MARKOV_DECAY}) chọn ${best} (P≈${bestP.toFixed(2)}).`;
+    const reason = `Sau mặt ${last}, Markov decay (λ=${lambda}) chọn ${best} (P≈${bestP.toFixed(2)}).`;
     return { id: "markov", name, predictedRed: best, confidence, parityConfidence, reason };
   }
 
@@ -549,13 +562,14 @@
       };
     }
     const last2 = `${reds[n - 2]},${reds[n - 1]}`;
+    const lambda = getMarkovDecay();
     const counts = {};
     for (let r = 0; r <= 4; r++) counts[r] = 0.2;
     let stateMatches = 0;
     for (let i = 0; i < n - 2; i++) {
       const state = `${reds[i]},${reds[i + 1]}`;
       if (state === last2) {
-        const w = Math.pow(MARKOV_DECAY, n - 3 - i);
+        const w = Math.pow(lambda, n - 3 - i);
         counts[reds[i + 2]] += w;
         stateMatches++;
       }
@@ -1279,6 +1293,15 @@
     H_HIT_SHRINK: 2,
     PARITY_HARD_CUTOFF: null,
     TOP_K: 7,
+    // Markov transition decay λ (0.5..1). 1.0 = no decay; 0.98 = ~34-round
+    // half-life. Defaults to 0.98 (existing behavior).
+    MARKOV_DECAY: 0.98,
+    // Cap history length fed to predictors. 0 / null = no cap (use full
+    // history). When set to N>0, only the last N rounds are passed to
+    // every predictor + hit-rate calculator. Use this once `rounds/`
+    // grows past ~5000 entries to bound compute and (if non-stationary)
+    // focus on recent regime.
+    MAX_HISTORY: 0,
   };
 
   /**
@@ -1420,8 +1443,17 @@
   }
 
   function ensemblePredict(history, opts) {
-    const h = normalizeHistory(history);
+    let h = normalizeHistory(history);
     const o = opts && typeof opts === "object" ? opts : {};
+    // Optional history cap. opts.maxHistory > 0 takes precedence over
+    // DYNAMIC_ENSEMBLE.MAX_HISTORY. 0 / null / undefined = no cap.
+    const cap =
+      o.maxHistory != null
+        ? Math.max(0, Math.floor(o.maxHistory))
+        : Math.max(0, Math.floor(DYNAMIC_ENSEMBLE.MAX_HISTORY || 0));
+    if (cap > 0 && h.length > cap) {
+      h = h.slice(-cap);
+    }
     const useDynamic = o.dynamic !== false;
     const useSingleHitWindow = o.hitWindow != null;
     const windowSize = useSingleHitWindow

@@ -83,6 +83,7 @@
         "HIT_WINDOW", "HIT_WINDOW_SHORT", "HIT_WINDOW_LONG",
         "HIT_MULTI_PHI", "HIT_BLEND_EXACT",
         "H_BASELINE", "H_HIT_SHRINK", "PARITY_HARD_CUTOFF",
+        "MARKOV_DECAY", "MAX_HISTORY",
       ];
       for (const k of KEYS) {
         if (k in _DE_DEFAULTS) DE[k] = _DE_DEFAULTS[k];

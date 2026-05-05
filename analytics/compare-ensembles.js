@@ -216,6 +216,25 @@ function buildConfigs() {
       predictors: ["pattern","markov","markov2","time","crowd","parityRepeat"],
       de: { TOP_K: 6, BETA: 2.5, HIT_BLEND_EXACT: 0.85 } },
 
+    // === Markov-decay sweep ===
+    // λ controls how fast old transitions are forgotten. λ=1.0 = no
+    // decay (full history equally weighted, "stationary" assumption);
+    // λ=0.98 = ~34-round half-life (default, mild decay); λ=0.95 = ~14-
+    // round half-life (aggressive recency bias).
+    //
+    // Empirically: if game is non-stationary, lower λ should win. If
+    // game is stationary, λ=1.0 should win. Use these to test which
+    // regime the dataset lives in.
+    { name: "duo + markov λ=1.00 (no decay)",
+      predictors: ["markov","pattern"],
+      de: { TOP_K: 2, MARKOV_DECAY: 1.0 } },
+    { name: "duo + markov λ=0.98 (default)",
+      predictors: ["markov","pattern"],
+      de: { TOP_K: 2, MARKOV_DECAY: 0.98 } },
+    { name: "duo + markov λ=0.95 (aggressive)",
+      predictors: ["markov","pattern"],
+      de: { TOP_K: 2, MARKOV_DECAY: 0.95 } },
+
     // NOTE: Tuned variants (duo-tuned, slim-6-tuned, lean-3-tuned) were
     // removed after verification showed they only deliver +1pp over their
     // default-hyperparam siblings when measured through engine.ensemblePredict.

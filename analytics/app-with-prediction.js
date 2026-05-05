@@ -1715,6 +1715,7 @@
       }
 
       const newlyAdded = Math.max(0, masterData.length - prevLen);
+      maybeAutoRecomputePresetBacktest();
       const when = lastFetchAt.toLocaleTimeString();
       const suffix = newlyAdded ? ` \u00b7 +${newlyAdded} m\u1edbi` : "";
       const liveSuffix = currentInProgress
@@ -1773,6 +1774,203 @@
     ];
     document.getElementById("backtestOut").textContent = lines.join("\n");
     window.__lastBacktest = { res, base, listMeta: { n: list.length, burnIn } };
+  }
+
+  // ===== Preset backtest panel =====
+  // Walk-forward each PRESET on the most-recent N rounds and render a
+  // table of CL% / Vi% / Sel@threshold. Re-runs on data length change
+  // (debounced), preset N change, burn-in change, threshold change,
+  // and explicit button click. Yields control between presets so the
+  // UI doesn't freeze.
+
+  let _presetBacktestRunning = false;
+  let _presetBacktestQueued = false;
+  let _presetBacktestLastDataLen = -1;
+  let _presetBacktestLastResult = null;
+
+  function getPresetBacktestN() {
+    const el = document.getElementById("presetBacktestN");
+    const v = parseInt(el && el.value, 10);
+    return Number.isFinite(v) && v > 0 ? Math.min(2000, Math.max(100, v)) : 300;
+  }
+  function getPresetBacktestBurnIn() {
+    const el = document.getElementById("presetBacktestBurnIn");
+    const v = parseInt(el && el.value, 10);
+    return Number.isFinite(v) && v > 0 ? Math.min(500, Math.max(50, v)) : 100;
+  }
+
+  function setPresetBacktestStatus(text) {
+    const el = document.getElementById("presetBacktestStatus");
+    if (el) el.textContent = text;
+  }
+
+  function renderPresetBacktestTable(results, threshold) {
+    const tbody = document.getElementById("presetBacktestTbody");
+    if (!tbody) return;
+    if (!results || !results.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="6" class="py-3 px-2 text-slate-500 text-center text-[11px]">Chưa có kết quả.</td></tr>';
+      return;
+    }
+    const bestCl = results.reduce(
+      (a, b) => (b.clPct > a.clPct ? b : a),
+      results[0],
+    );
+    const currentPreset = getPredictorPreset();
+    const thrPct = Math.round(threshold * 100);
+    const rows = results.map((r) => {
+      const isBest = r.id === bestCl.id;
+      const isCurrent = r.id === currentPreset;
+      const star = isBest ? '<span class="text-amber-400">★</span> ' : "";
+      const tag = isCurrent
+        ? '<span class="text-[9px] font-black text-emerald-400 ml-1">(active)</span>'
+        : "";
+      const rowCls = isCurrent
+        ? "bg-emerald-500/5 border-b border-slate-800"
+        : "border-b border-slate-800/50";
+      const clCls = isBest
+        ? "text-amber-300 font-bold"
+        : "text-slate-300";
+      return `<tr class="${rowCls}">
+        <td class="py-1.5 px-2 text-slate-200">${star}${r.id}${tag}</td>
+        <td class="py-1.5 px-2 text-right ${clCls}">${r.clPct.toFixed(2)}%</td>
+        <td class="py-1.5 px-2 text-right text-slate-400">${r.viPct.toFixed(2)}%</td>
+        <td class="py-1.5 px-2 text-right text-slate-300">${r.selTypePct.toFixed(2)}% <span class="text-[9px] text-slate-500">@${thrPct}%</span></td>
+        <td class="py-1.5 px-2 text-right text-slate-400">${r.selCoverage.toFixed(1)}%</td>
+        <td class="py-1.5 px-2 text-right text-slate-500">${r.n}</td>
+      </tr>`;
+    });
+    tbody.innerHTML = rows.join("");
+  }
+
+  async function runPresetBacktest() {
+    if (_presetBacktestRunning) {
+      _presetBacktestQueued = true;
+      return;
+    }
+    const P = window.XocDiaPrediction;
+    if (!P) return;
+    if (!masterData || masterData.length < 60) {
+      setPresetBacktestStatus(
+        `Cần ≥ 60 round (hiện ${masterData ? masterData.length : 0}).`,
+      );
+      renderPresetBacktestTable([], getSelectiveThreshold());
+      return;
+    }
+
+    const N = getPresetBacktestN();
+    const burnIn = getPresetBacktestBurnIn();
+    const threshold = getSelectiveThreshold();
+
+    if (burnIn >= N) {
+      setPresetBacktestStatus(`Burn-in (${burnIn}) phải < N (${N}).`);
+      return;
+    }
+    const window_ = masterData.slice(-N);
+    if (window_.length <= burnIn + 10) {
+      setPresetBacktestStatus(
+        `Cần ≥ burn-in + 10 round trong cửa sổ (cửa sổ ${window_.length}, burn-in ${burnIn}).`,
+      );
+      return;
+    }
+
+    _presetBacktestRunning = true;
+    const btn = document.getElementById("presetBacktestRunBtn");
+    if (btn) btn.disabled = true;
+
+    // Save current engine state and restore at end.
+    const savedPreset = getPredictorPreset();
+    const t0 = performance.now();
+    const results = [];
+
+    try {
+      const presetIds = Object.keys(PREDICTOR_PRESETS);
+      for (let i = 0; i < presetIds.length; i++) {
+        const pid = presetIds[i];
+        setPresetBacktestStatus(
+          `Đang tính ${i + 1}/${presetIds.length} — ${pid}...`,
+        );
+        // Yield to event loop before each preset so the UI can update
+        // status text and remain responsive.
+        await new Promise((r) => setTimeout(r, 0));
+
+        applyPredictorPreset(pid);
+
+        let dynExact = 0,
+          dynType = 0,
+          n = 0;
+        let bet = 0,
+          ty = 0;
+        for (let t = burnIn; t < window_.length; t++) {
+          const past = window_.slice(0, t);
+          const actual = window_[t];
+          const ens = P.ensemblePredict(past);
+          n++;
+          if (ens.predictedRed === actual.red) dynExact++;
+          if (ens.predictedRed % 2 === actual.red % 2) dynType++;
+          const conf = ens.betConfidence || 0;
+          if (conf >= threshold) {
+            bet++;
+            if (ens.predictedRed % 2 === actual.red % 2) ty++;
+          }
+        }
+        results.push({
+          id: pid,
+          n,
+          clPct: n ? (dynType / n) * 100 : 0,
+          viPct: n ? (dynExact / n) * 100 : 0,
+          selTypePct: bet ? (ty / bet) * 100 : 0,
+          selCoverage: n ? (bet / n) * 100 : 0,
+        });
+      }
+    } finally {
+      // Restore active preset so the rest of the UI keeps using it.
+      applyPredictorPreset(savedPreset);
+      _presetBacktestRunning = false;
+      if (btn) btn.disabled = false;
+    }
+
+    _presetBacktestLastResult = { results, threshold };
+    _presetBacktestLastDataLen = masterData.length;
+    const elapsed = (performance.now() - t0).toFixed(0);
+    const stamp = new Date().toLocaleTimeString();
+    setPresetBacktestStatus(
+      `Đã tính N=${N}, burn-in=${burnIn} lúc ${stamp} (${elapsed}ms, threshold=${Math.round(threshold * 100)}%).`,
+    );
+    renderPresetBacktestTable(results, threshold);
+
+    if (_presetBacktestQueued) {
+      _presetBacktestQueued = false;
+      // Run-once more to absorb any queued change.
+      runPresetBacktest();
+    }
+  }
+
+  // Debounce wrapper for user-input changes (N / burn-in fields).
+  let _presetBacktestDebounce = null;
+  function schedulePresetBacktest(delayMs) {
+    if (_presetBacktestDebounce) clearTimeout(_presetBacktestDebounce);
+    _presetBacktestDebounce = setTimeout(() => {
+      _presetBacktestDebounce = null;
+      runPresetBacktest();
+    }, delayMs == null ? 400 : delayMs);
+  }
+
+  // Auto-recompute when masterData grows by at least RECOMPUTE_DELTA
+  // rounds since last backtest. Avoids re-running every 3s poll.
+  const RECOMPUTE_DELTA = 5;
+  function maybeAutoRecomputePresetBacktest() {
+    if (!_presetBacktestLastResult) {
+      // First run — go now.
+      schedulePresetBacktest(800);
+      return;
+    }
+    if (
+      masterData.length - _presetBacktestLastDataLen >=
+      RECOMPUTE_DELTA
+    ) {
+      schedulePresetBacktest(800);
+    }
   }
 
   function exportJson() {
@@ -1937,7 +2135,39 @@
     presetSelect.addEventListener("change", () => {
       setPredictorPreset(presetSelect.value);
       refresh();
+      // Re-render last backtest table so the (active) tag moves to the
+      // new preset row without recomputing.
+      if (_presetBacktestLastResult) {
+        renderPresetBacktestTable(
+          _presetBacktestLastResult.results,
+          _presetBacktestLastResult.threshold,
+        );
+      }
     });
+  }
+
+  // Preset backtest panel handlers
+  const presetBacktestRunBtn = document.getElementById(
+    "presetBacktestRunBtn",
+  );
+  if (presetBacktestRunBtn) {
+    presetBacktestRunBtn.addEventListener("click", () => {
+      runPresetBacktest();
+    });
+  }
+  const presetBacktestNInput = document.getElementById("presetBacktestN");
+  if (presetBacktestNInput) {
+    presetBacktestNInput.addEventListener("change", () =>
+      schedulePresetBacktest(200),
+    );
+  }
+  const presetBacktestBurnInInput = document.getElementById(
+    "presetBacktestBurnIn",
+  );
+  if (presetBacktestBurnInInput) {
+    presetBacktestBurnInInput.addEventListener("change", () =>
+      schedulePresetBacktest(200),
+    );
   }
 
   // Selective-betting threshold slider — live-update the bet badge by

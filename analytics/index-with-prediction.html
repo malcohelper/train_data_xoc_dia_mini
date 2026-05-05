@@ -217,6 +217,55 @@
       </div>
     </div>
 
+    <!-- Backtest accuracy panel — đo type%/vị% mỗi preset trên N round gần nhất -->
+    <div class="stat-card rounded-2xl p-5 border-l-4 border-l-violet-500/70">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-violet-300 flex items-center gap-2">
+          <span class="w-1.5 h-4 bg-violet-500 rounded-full"></span>
+          Backtest 5 preset trên N round gần nhất
+        </h3>
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-col gap-0.5">
+            <label class="text-[9px] font-black text-slate-500 uppercase tracking-wider">N rounds</label>
+            <input type="number" id="presetBacktestN" min="100" max="2000" step="50" value="300"
+              class="bg-slate-800 border border-slate-700 text-xs rounded-md px-2 py-1 w-24 text-white font-mono">
+          </div>
+          <div class="flex flex-col gap-0.5">
+            <label class="text-[9px] font-black text-slate-500 uppercase tracking-wider">Burn-in</label>
+            <input type="number" id="presetBacktestBurnIn" min="50" max="500" step="25" value="100"
+              class="bg-slate-800 border border-slate-700 text-xs rounded-md px-2 py-1 w-24 text-white font-mono">
+          </div>
+          <button id="presetBacktestRunBtn"
+            class="bg-violet-600 hover:bg-violet-500 text-xs font-black uppercase tracking-wide rounded-md px-3 py-1.5 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            Tính lại
+          </button>
+        </div>
+      </div>
+      <div id="presetBacktestStatus" class="text-[10px] text-slate-500 font-mono mb-2 min-h-[14px]"></div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="text-[10px] font-black text-slate-500 uppercase tracking-wider border-b border-slate-800">
+              <th class="text-left py-2 px-2">Preset</th>
+              <th class="text-right py-2 px-2">CL% (chẵn/lẻ)</th>
+              <th class="text-right py-2 px-2">Vi% (đúng vị)</th>
+              <th class="text-right py-2 px-2">Sel @ ngưỡng</th>
+              <th class="text-right py-2 px-2">Coverage</th>
+              <th class="text-right py-2 px-2">n</th>
+            </tr>
+          </thead>
+          <tbody id="presetBacktestTbody" class="font-mono">
+            <tr><td colspan="6" class="py-3 px-2 text-slate-500 text-center text-[11px]">Chưa tính. Bấm "Tính lại" hoặc đợi data load xong.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="text-[10px] text-slate-500 font-mono mt-2 leading-snug">
+        Walk-forward backtest: dùng N round gần nhất, predict round t bằng [0..t-1].
+        Cột "Sel @ ngưỡng" dùng ngưỡng confidence anh đặt ở slider trên.
+        Best CL% được đánh dấu ★. Auto-tính lại khi data đổi hoặc N/burn-in đổi.
+      </div>
+    </div>
+
     <!-- Live Round Panel — shown during betting phase -->
     <div id="liveRoundPanel" class="hidden stat-card rounded-2xl p-5 border border-emerald-500/40 border-l-4 border-l-emerald-500 relative overflow-hidden">
       <div class="absolute inset-0 pointer-events-none bg-gradient-to-r from-emerald-500/[0.03] to-transparent"></div>

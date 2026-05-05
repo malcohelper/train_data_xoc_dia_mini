@@ -568,6 +568,140 @@
     } catch (_) {
       /* quota / private mode */
     }
+    // Best-effort: replicate to the host's shared file via the
+    // analytics.serve POST endpoint. If we're a viewer connecting
+    // through a cloudflare tunnel the server will return 403 and we
+    // permanently switch into "viewer" mode (no further POSTs sent).
+    pushServerHistory(arr);
+  }
+
+  // ───────────────────────────── server-side history sync ─────────────────────────────
+  // analytics/serve.py exposes GET / POST /api/prediction-history.json so
+  // multiple browsers (including read-only viewers reaching the host
+  // through `--tunnel`) all see the SAME prediction history. The host
+  // browser writes; tunnel viewers read.
+  const HISTORY_API_URL = "/api/prediction-history.json";
+
+  // "unknown" until the first GET/POST settles. After that:
+  //   "available"   — server is up, this browser can write (host)
+  //   "viewer"      — server is up, but POSTs are rejected (we came in via tunnel)
+  //   "unavailable" — server is missing the endpoint (e.g. older serve.py)
+  let _historyServerStatus = "unknown";
+  let _lastServerHistorySig = null; // length + first round_id, used to skip no-op re-renders
+  let _historyBannerEl = null;
+
+  function _historySignature(arr) {
+    if (!Array.isArray(arr) || !arr.length) return "0|";
+    return `${arr.length}|${arr[0].round_id || ""}|${arr[0].at || ""}`;
+  }
+
+  function setHistoryBanner(el) {
+    _historyBannerEl = el;
+    renderHistoryBanner();
+  }
+
+  function renderHistoryBanner() {
+    if (!_historyBannerEl) return;
+    const el = _historyBannerEl;
+    if (_historyServerStatus === "viewer") {
+      el.textContent = "Đang xem qua tunnel — read-only (lịch sử đồng bộ từ máy host)";
+      el.className = "text-[10px] text-amber-300/90 font-medium";
+    } else if (_historyServerStatus === "available") {
+      el.textContent = "Đã đồng bộ lên server (máy này là host, viewer khác sẽ thấy giống)";
+      el.className = "text-[10px] text-emerald-400/80 font-medium";
+    } else if (_historyServerStatus === "unavailable") {
+      el.textContent = "Chỉ lưu local (server cũ chưa hỗ trợ chia sẻ lịch sử qua tunnel)";
+      el.className = "text-[10px] text-slate-500";
+    } else {
+      el.textContent = "";
+      el.className = "text-[10px] text-slate-600";
+    }
+  }
+
+  async function pullServerHistory() {
+    try {
+      const r = await fetch(HISTORY_API_URL, { cache: "no-store" });
+      if (r.status === 404) {
+        _historyServerStatus = "unavailable";
+        renderHistoryBanner();
+        return null;
+      }
+      if (!r.ok) {
+        _historyServerStatus = "unavailable";
+        renderHistoryBanner();
+        return null;
+      }
+      const writable = r.headers.get("X-History-Writable");
+      // First sighting: derive status from the writable hint so the
+      // banner is correct even before we attempt our first POST.
+      if (_historyServerStatus === "unknown") {
+        _historyServerStatus = writable === "0" ? "viewer" : "available";
+        renderHistoryBanner();
+      }
+      const data = await r.json();
+      return Array.isArray(data) ? data : null;
+    } catch (_) {
+      _historyServerStatus = "unavailable";
+      renderHistoryBanner();
+      return null;
+    }
+  }
+
+  async function pushServerHistory(arr) {
+    if (
+      _historyServerStatus === "viewer" ||
+      _historyServerStatus === "unavailable"
+    )
+      return;
+    try {
+      const r = await fetch(HISTORY_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(arr || []),
+      });
+      if (r.status === 403) {
+        _historyServerStatus = "viewer";
+        renderHistoryBanner();
+        return;
+      }
+      if (r.status === 404) {
+        _historyServerStatus = "unavailable";
+        renderHistoryBanner();
+        return;
+      }
+      if (r.ok) {
+        if (_historyServerStatus === "unknown") {
+          _historyServerStatus = "available";
+          renderHistoryBanner();
+        }
+      }
+    } catch (_) {
+      // Network glitch — leave status as-is, we'll retry on the next save.
+    }
+  }
+
+  /**
+   * Pull the server's snapshot and, if it differs from our localStorage,
+   * replace local with server and re-render. Called on boot + on every
+   * poll cycle so a viewer browser stays in sync with the host.
+   */
+  async function syncFromServerIfChanged() {
+    const remote = await pullServerHistory();
+    if (!remote) return;
+    const local = loadCompareHistory();
+    const localSig = _historySignature(local);
+    const remoteSig = _historySignature(remote);
+    if (remoteSig === _lastServerHistorySig && remoteSig === localSig) return;
+    _lastServerHistorySig = remoteSig;
+    if (remoteSig === localSig) return;
+    // Bypass saveCompareHistory's POST path — the data we're writing
+    // came FROM the server, posting it back would be a wasteful echo.
+    try {
+      localStorage.setItem(COMPARE_LS_KEY, JSON.stringify(remote));
+    } catch (_) {
+      /* ignore */
+    }
+    renderCompareHistoryList();
   }
 
   function getCompareStatsWindowN() {
@@ -2145,6 +2279,10 @@
       } catch (_) {
         /* ignore */
       }
+      // Mirror the clear to the server so other viewers don't keep
+      // showing stale rows. POST is a no-op for viewer/unavailable
+      // statuses (handled inside pushServerHistory).
+      pushServerHistory([]);
       renderCompareHistoryList();
     });
   }
@@ -2264,11 +2402,20 @@
     const compareStatsNInput = document.getElementById("compareStatsN");
     if (compareStatsNInput)
       compareStatsNInput.value = String(getCompareStatsWindowN());
+    setHistoryBanner(document.getElementById("historySyncBanner"));
     renderCompareHistoryList();
     const now = new Date();
     setFilterRange(new Date(now.getTime() - 60 * 60 * 1000), now);
     setFollow(true);
+    // Pull the host's shared history once on boot. If the server is
+    // up + has data, it overrides whatever this browser had cached
+    // locally (matches "host is the source of truth" semantics).
+    await syncFromServerIfChanged();
     await refresh();
     setInterval(refresh, POLL_MS);
+    // Re-pull the server's history on a slightly slower cadence than
+    // round polling. This is what keeps a viewer browser's panel
+    // updating when the host browser writes new rows.
+    setInterval(syncFromServerIfChanged, POLL_MS * 2);
   })();
 })();

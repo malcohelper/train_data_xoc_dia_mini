@@ -60,7 +60,9 @@ function loadRounds(roundsDir) {
     try {
       const j = JSON.parse(fs.readFileSync(fp, "utf-8"));
       const finalised = j.finalised_at || j.finalisedAt;
-      const dice = j.dice_class || j.diceClass;
+      // Production rounds (realtime_capture.py) write `dice_result`; tolerate
+      // legacy `dice_class` aliases too.
+      const dice = j.dice_result || j.diceResult || j.dice_class || j.diceClass;
       if (!finalised || !DICE_TO_RED.hasOwnProperty(dice)) {
         skipped.push(name);
         continue;

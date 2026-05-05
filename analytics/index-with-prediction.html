@@ -440,6 +440,41 @@
               </div>
             </div>
             <div>
+              <div class="flex items-baseline justify-between gap-2 mb-2">
+                <div class="text-[9px] font-black text-amber-300/95 uppercase tracking-wide">Selective · chỉ phiên đã BET</div>
+                <div class="text-[9px] font-mono text-slate-500" title="Số phiên có cờ bet / số phiên đang xét — phiên cũ không có cờ sẽ không tính.">
+                  <span id="compareStatsBetSummary" class="text-slate-300">—</span>
+                </div>
+              </div>
+              <p class="text-[10px] text-slate-500 mb-2 leading-relaxed">
+                Chỉ đếm phiên có <b class="text-amber-300/90">conf ≥ ngưỡng</b> tại thời điểm lưu (ngưỡng anh đặt ở slider phía trên).
+                Phiên bỏ qua không tính cả thắng lẫn thua. <b class="text-slate-400">Coverage</b> = % phiên được BET trong cửa sổ.
+              </p>
+              <div class="grid grid-cols-3 gap-3">
+                <div class="rounded-lg bg-slate-950/60 border border-amber-900/40 p-3">
+                  <div class="text-[9px] font-bold text-slate-500 uppercase mb-1">Đúng vị (chỉ bet)</div>
+                  <div id="compareStatsBetExactPct" class="text-2xl font-black text-emerald-400 tabular-nums">—</div>
+                  <div class="progress-bar mt-2 h-2">
+                    <div id="compareStatsBetExactBar" class="h-full bg-emerald-500 rounded transition-all duration-300"
+                      style="width:0%"></div>
+                  </div>
+                </div>
+                <div class="rounded-lg bg-slate-950/60 border border-amber-900/40 p-3">
+                  <div class="text-[9px] font-bold text-slate-500 uppercase mb-1">Đúng CL (chỉ bet)</div>
+                  <div id="compareStatsBetParityPct" class="text-2xl font-black text-cyan-400 tabular-nums">—</div>
+                  <div class="progress-bar mt-2 h-2">
+                    <div id="compareStatsBetParityBar" class="h-full bg-cyan-500 rounded transition-all duration-300"
+                      style="width:0%"></div>
+                  </div>
+                </div>
+                <div class="rounded-lg bg-slate-950/60 border border-amber-900/40 p-3">
+                  <div class="text-[9px] font-bold text-slate-500 uppercase mb-1">Coverage</div>
+                  <div id="compareStatsBetCoveragePct" class="text-2xl font-black text-amber-300 tabular-nums">—</div>
+                  <div class="text-[9px] text-slate-500 mt-2 leading-relaxed">% phiên được bet trên tổng phiên có cờ.</div>
+                </div>
+              </div>
+            </div>
+            <div>
               <div class="text-[9px] font-black text-slate-500 uppercase tracking-wide mb-2">Tĩnh · C^β</div>
               <div class="grid grid-cols-2 gap-3">
                 <div class="rounded-lg bg-slate-950/60 border border-slate-800 p-3">

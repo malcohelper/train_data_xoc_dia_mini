@@ -596,6 +596,19 @@
     return e.predRedStatic != null && Number.isFinite(Number(e.predRedStatic));
   }
 
+  /**
+   * Round was "bet" if it was saved with `bet === true` (engine recommended bet
+   * given threshold at save time). Legacy rows without `bet` flag are excluded
+   * from selective accuracy (re-deriving from old `betConf`+threshold loses the
+   * threshold-at-save semantics, so we just skip).
+   */
+  function compareHistoryHasBetFlag(e) {
+    return e && typeof e.bet === "boolean";
+  }
+  function compareHistoryWasBet(e) {
+    return compareHistoryHasBetFlag(e) && e.bet === true;
+  }
+
   function compareHistoryStaticExactOk(e) {
     if (!compareHistoryHasStaticPred(e) || e.actualRed == null) return false;
     if (e.staticExactOk != null) return !!e.staticExactOk;
@@ -685,6 +698,22 @@
     const exStaticPct = staticLen ? Math.round((100 * exS) / staticLen) : null;
     const tyStaticPct = staticLen ? Math.round((100 * tyS) / staticLen) : null;
 
+    // Selective accuracy: only rows where engine said "bet" (betConf >=
+    // threshold at save time). Legacy rows without a `bet` flag are excluded
+    // from the slice — both numerator and denominator skip them, so legacy
+    // data never inflates or deflates the selective metric.
+    const flaggedSlice = slice.filter(compareHistoryHasBetFlag);
+    const betSlice = flaggedSlice.filter(compareHistoryWasBet);
+    const flaggedLen = flaggedSlice.length;
+    const betLen = betSlice.length;
+    const exBet = betSlice.filter((e) => e.exactOk).length;
+    const tyBet = betSlice.filter((e) => compareHistoryParityMatches(e)).length;
+    const exBetPct = betLen ? Math.round((100 * exBet) / betLen) : null;
+    const tyBetPct = betLen ? Math.round((100 * tyBet) / betLen) : null;
+    const coveragePct = flaggedLen
+      ? Math.round((100 * betLen) / flaggedLen)
+      : null;
+
     const pct = (v) => (v == null ? "—" : `${v}%`);
     const bar = (v) => (v == null ? "0%" : `${Math.min(100, v)}%`);
 
@@ -709,6 +738,28 @@
     if (elStTy) elStTy.textContent = pct(tyStaticPct);
     if (barStEx) barStEx.style.width = bar(exStaticPct);
     if (barStTy) barStTy.style.width = bar(tyStaticPct);
+
+    const elBetEx = document.getElementById("compareStatsBetExactPct");
+    const elBetTy = document.getElementById("compareStatsBetParityPct");
+    const barBetEx = document.getElementById("compareStatsBetExactBar");
+    const barBetTy = document.getElementById("compareStatsBetParityBar");
+    const elBetCov = document.getElementById("compareStatsBetCoveragePct");
+    const elBetSummary = document.getElementById("compareStatsBetSummary");
+    if (elBetEx) elBetEx.textContent = pct(exBetPct);
+    if (elBetTy) elBetTy.textContent = pct(tyBetPct);
+    if (barBetEx) barBetEx.style.width = bar(exBetPct);
+    if (barBetTy) barBetTy.style.width = bar(tyBetPct);
+    if (elBetCov) elBetCov.textContent = pct(coveragePct);
+    if (elBetSummary) {
+      if (!list.length || len === 0) elBetSummary.textContent = "—";
+      else if (flaggedLen === 0)
+        elBetSummary.textContent = `0 / ${len.toLocaleString("vi-VN")} (chưa có cờ bet — chờ phiên mới)`;
+      else if (betLen === 0)
+        elBetSummary.textContent = `0 bet / ${flaggedLen.toLocaleString("vi-VN")} có cờ (ngưỡng quá cao)`;
+      else
+        elBetSummary.textContent = `${betLen.toLocaleString("vi-VN")} bet / ${flaggedLen.toLocaleString("vi-VN")} có cờ`;
+    }
+
     if (cnt) cnt.textContent = `${list.length.toLocaleString("vi-VN")} mục`;
     if (subN)
       subN.textContent = len > 0 ? `${len.toLocaleString("vi-VN")} phiên` : "—";
@@ -901,6 +952,18 @@
     const am = P.getOutcomeMeta(actualRed);
     const actP = actualRed % 2 === 0 ? "chan" : "le";
 
+    // Capture selective-betting decision at save time. `bet` reflects whether
+    // the engine would have recommended placing a bet given the threshold the
+    // user had set in this exact moment (threshold can change later, but the
+    // historical decision must stay frozen for the selective stats to be
+    // meaningful).
+    const betConfRaw = Number.isFinite(ensembleDynamic.betConfidence)
+      ? Number(ensembleDynamic.betConfidence)
+      : null;
+    const thresholdAtSave = getSelectiveThreshold();
+    const wasBet =
+      betConfRaw != null && betConfRaw >= thresholdAtSave;
+
     const row = {
       round_id: roundId,
       at: new Date().toISOString(),
@@ -913,6 +976,9 @@
       actualRed,
       parityOk: predR % 2 === actualRed % 2,
       exactOk: predR === actualRed,
+      betConf: betConfRaw,
+      threshold: thresholdAtSave,
+      bet: wasBet,
     };
     if (
       ensembleStatic &&

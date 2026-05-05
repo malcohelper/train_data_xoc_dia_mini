@@ -9,6 +9,119 @@
   const ALERT_CONSENSUS = 0.83;
   const COMPARE_LS_KEY = "xocdia_compare_history_v1";
   const COMPARE_WINDOW_LS = "xocdia_compare_stats_window_v1";
+  const PREDICTOR_PRESET_LS = "xocdia_predictor_preset_v1";
+  const SELECTIVE_THRESHOLD_LS = "xocdia_selective_threshold_v1";
+
+  // Backtest-validated subsets of the 11 predictors. Empirically the
+  // dynamic ensemble was being dragged down by 5 weak algos
+  // (streak/regression/cauPattern/balance/bayesian, all ≤52% type accuracy
+  // on 894-round backtest). Slimming the ensemble + favouring markov +
+  // pattern lifts engine.ensemblePredict CL%:
+  //
+  //   baseline-11        : 55.32% type
+  //   slim-6             : 59.57%
+  //   lean-3 / duo       : 60.64%
+  //   markov-solo        : 61.70%
+  //
+  // 'duo' (markov + pattern) hits 69% type at threshold 0.50 (62%
+  // coverage) — best operational config measured by
+  // analytics/compare-ensembles.js on 94 test rounds.
+  //
+  // NOTE: do NOT trust analytics/grid-search.js absolute numbers; it
+  // re-implements ensemble weighting and overstates CL by ~3-7pp
+  // relative to engine.ensemblePredict. Tuned presets that lived here
+  // briefly (duo-tuned, slim-6-tuned, lean-3-tuned) were rolled back
+  // because their hyperparameters didn't reproduce in engine code.
+  //
+  // Each preset is { ids: string[]|null, de?: object } where `de`
+  // overrides keys on engine.DYNAMIC_ENSEMBLE while the preset is
+  // active. `ids=null` means use the full 11-algo set. No production
+  // preset currently sets `de`; the field is kept for future use.
+  const PREDICTOR_PRESETS = {
+    duo: { ids: ["markov", "pattern"] },
+    "markov-solo": { ids: ["markov"] },
+    "lean-3": { ids: ["pattern", "markov", "markov2"] },
+    "slim-6": {
+      ids: ["pattern", "markov", "markov2", "time", "crowd", "parityRepeat"],
+    },
+    "baseline-11": { ids: null /* full set */ },
+  };
+  const DEFAULT_PRESET = "duo";
+  const DEFAULT_THRESHOLD = 0.5;
+
+  // Snapshot of original DYNAMIC_ENSEMBLE values, captured the first
+  // time applyPredictorPreset() runs so we can restore defaults when
+  // switching to a preset that doesn't override a key.
+  let _DE_DEFAULTS = null;
+
+  function getPredictorPreset() {
+    try {
+      const v = localStorage.getItem(PREDICTOR_PRESET_LS);
+      if (v && PREDICTOR_PRESETS[v] !== undefined) return v;
+    } catch (_) {
+      /* ignore */
+    }
+    return DEFAULT_PRESET;
+  }
+
+  function applyPredictorPreset(name) {
+    const cfg = PREDICTOR_PRESETS[name];
+    if (!cfg) return;
+    const P = window.XocDiaPrediction;
+    if (!P || typeof P.setActivePredictors !== "function") return;
+    P.setActivePredictors(cfg.ids || null);
+    const DE = P.DYNAMIC_ENSEMBLE;
+    if (DE) {
+      if (_DE_DEFAULTS === null) {
+        _DE_DEFAULTS = { ...DE };
+      }
+      // Reset every overridable key to default, then apply preset's
+      // overrides. Only touch keys we know about so we don't clobber
+      // keys added later in the engine.
+      const KEYS = [
+        "ALPHA", "BETA", "TOP_K",
+        "HIT_WINDOW", "HIT_WINDOW_SHORT", "HIT_WINDOW_LONG",
+        "HIT_MULTI_PHI", "HIT_BLEND_EXACT",
+        "H_BASELINE", "H_HIT_SHRINK", "PARITY_HARD_CUTOFF",
+      ];
+      for (const k of KEYS) {
+        if (k in _DE_DEFAULTS) DE[k] = _DE_DEFAULTS[k];
+      }
+      const overrides = cfg.de || {};
+      for (const k of Object.keys(overrides)) DE[k] = overrides[k];
+    }
+  }
+
+  function setPredictorPreset(name) {
+    if (!Object.prototype.hasOwnProperty.call(PREDICTOR_PRESETS, name)) return;
+    try {
+      localStorage.setItem(PREDICTOR_PRESET_LS, name);
+    } catch (_) {
+      /* ignore */
+    }
+    applyPredictorPreset(name);
+  }
+
+  function getSelectiveThreshold() {
+    try {
+      const raw = localStorage.getItem(SELECTIVE_THRESHOLD_LS);
+      const v = parseFloat(raw);
+      if (Number.isFinite(v) && v >= 0 && v <= 1) return v;
+    } catch (_) {
+      /* ignore */
+    }
+    return DEFAULT_THRESHOLD;
+  }
+
+  function setSelectiveThreshold(v) {
+    const clamped = Math.max(0, Math.min(1, Number(v) || 0));
+    try {
+      localStorage.setItem(SELECTIVE_THRESHOLD_LS, String(clamped));
+    } catch (_) {
+      /* ignore */
+    }
+    return clamped;
+  }
   /** Ngưỡng an toàn cho input N (cửa sổ %) — không cắt lịch sử khi lưu. */
   const STATS_N_MAX = Number.MAX_SAFE_INTEGER;
 
@@ -1251,9 +1364,16 @@
     document.getElementById("predReason").textContent =
       ensembleFiltered.weightedReason || "—";
 
+    const userThreshold = getSelectiveThreshold();
+    const betConf = Number.isFinite(ensembleFiltered.betConfidence)
+      ? ensembleFiltered.betConfidence
+      : 0;
+    const passUserThreshold = betConf >= userThreshold;
+    const effectiveShouldBet = ensembleFiltered.shouldBet && passUserThreshold;
+
     const betBadgeEl = document.getElementById("betBadge");
     if (betBadgeEl) {
-      if (ensembleFiltered.shouldBet) {
+      if (effectiveShouldBet) {
         betBadgeEl.className = "px-3 py-1 rounded-full text-xs font-bold bg-emerald-600/80 text-white";
         betBadgeEl.textContent = "✓ NÊN BET";
       } else {
@@ -1262,9 +1382,17 @@
       }
     }
     const betReasonEl = document.getElementById("betReason");
-    if (betReasonEl) betReasonEl.textContent = ensembleFiltered.betReason || "";
+    if (betReasonEl) {
+      const engineReason = ensembleFiltered.betReason || "";
+      if (ensembleFiltered.shouldBet && !passUserThreshold) {
+        betReasonEl.textContent =
+          `Bỏ qua: confidence ${pct01(betConf)}% dưới ngưỡng người dùng ${pct01(userThreshold)}%`;
+      } else {
+        betReasonEl.textContent = engineReason;
+      }
+    }
     const betConfEl = document.getElementById("betConfValue");
-    if (betConfEl) betConfEl.textContent = `${pct01(ensembleFiltered.betConfidence)}%`;
+    if (betConfEl) betConfEl.textContent = `${pct01(betConf)}%`;
     const regimeEl = document.getElementById("regimeValue");
     if (regimeEl) {
       const regimeLabels = { streaky: "Chuỗi (Streaky)", alternating: "Xen kẽ (Alternating)", random: "Ngẫu nhiên (Random)" };
@@ -1797,6 +1925,43 @@
   document.getElementById("compareStatsN")?.addEventListener("change", () => {
     updateCompareStatsPanel();
   });
+
+  // Predictor preset dropdown — apply saved preset to engine before any
+  // ensemblePredict() call, then wire change handler to re-run refresh()
+  // so the user sees the new ensemble immediately.
+  applyPredictorPreset(getPredictorPreset());
+  const presetSelect = document.getElementById("predictorPreset");
+  if (presetSelect) {
+    presetSelect.value = getPredictorPreset();
+    presetSelect.addEventListener("change", () => {
+      setPredictorPreset(presetSelect.value);
+      refresh();
+    });
+  }
+
+  // Selective-betting threshold slider — live-update the bet badge by
+  // re-rendering current prediction (no need to re-fetch).
+  const thresholdSlider = document.getElementById("selectiveThreshold");
+  const thresholdLabel = document.getElementById("selectiveThresholdLabel");
+  if (thresholdSlider) {
+    const initVal = Math.round(getSelectiveThreshold() * 100);
+    thresholdSlider.value = String(initVal);
+    if (thresholdLabel) thresholdLabel.textContent = String(initVal);
+    thresholdSlider.addEventListener("input", () => {
+      const v = parseInt(thresholdSlider.value, 10) || 0;
+      setSelectiveThreshold(v / 100);
+      if (thresholdLabel) thresholdLabel.textContent = String(v);
+      // Re-render with current snapshot if available
+      const P = window.XocDiaPrediction;
+      if (P && masterData.length) {
+        const list = filtered();
+        renderPrediction(
+          P.ensemblePredict(list),
+          P.ensemblePredict(list, { dynamic: false }),
+        );
+      }
+    });
+  }
 
   (async () => {
     const compareStatsNInput = document.getElementById("compareStatsN");

@@ -205,6 +205,14 @@ function buildConfigs() {
     { name: "slim-6 + beta=2.5 + blend=0.85",
       predictors: ["pattern","markov","markov2","time","crowd","parityRepeat"],
       de: { TOP_K: 6, BETA: 2.5, HIT_BLEND_EXACT: 0.85 } },
+
+    // NOTE: Tuned variants (duo-tuned, slim-6-tuned, lean-3-tuned) were
+    // removed after verification showed they only deliver +1pp over their
+    // default-hyperparam siblings when measured through engine.ensemblePredict.
+    // The 3-7pp gap previously claimed came from analytics/grid-search.js
+    // using a hand-rolled evalDynamic that diverges from the engine
+    // (no regime boost, no parity weight boost, different hit-rate window
+    // source). See analytics/grid-search.js preamble for details.
   ];
 }
 

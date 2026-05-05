@@ -3,9 +3,34 @@
  * Fast grid search: pre-computes all per-algo predictions, then searches
  * over ensemble weighting parameters without re-running predictors.
  *
+ * ⚠️  IMPORTANT — divergence from production engine
+ *
+ * `evalDynamic` below is a hand-rolled re-implementation of ensemble
+ * weighting; it does NOT call engine.ensemblePredict. It diverges from
+ * the production engine in several ways:
+ *
+ *   1. Hit-rate window: this script accumulates hit-rates from the test
+ *      set as it walks forward. The engine recomputes hit-rates by
+ *      re-running predictors over the last N rounds of FULL HISTORY
+ *      (training + already-tested).
+ *   2. No regime boost: engine applies REGIME_BOOST (parityRepeat ×
+ *      1.15 in streaky regime, etc.); this script does not.
+ *   3. No parity weight boost: engine applies
+ *      `min(1.25, max(0.8, parityConf/conf))` to per-algo weights when
+ *      computing parity tally; this script uses raw weights.
+ *   4. Single hit-window vs multi-timeframe: engine blends short + long
+ *      windows (`mergeMultiTimeframeHitRates`); this script uses a
+ *      single window.
+ *
+ * Empirically this script OVERSTATES dynamic CL% by 3-7pp vs
+ * compare-ensembles.js (which uses engine.ensemblePredict). USE THIS
+ * SCRIPT FOR DIRECTION ONLY (which subset / window / α-β region looks
+ * promising) — verify absolute numbers with compare-ensembles.js.
+ *
  * Usage:
  *   node analytics/grid-search.js
  *   node analytics/grid-search.js --rounds path/to/rounds
+ *   node analytics/grid-search.js --burn-in 800 --predictors markov,pattern
  */
 "use strict";
 
@@ -213,9 +238,14 @@ function main() {
   let roundsDir = path.join(__dirname, "..", "rounds");
   let topN = 15;
   let predictors = null;
+  let burnIn = 1;
   for (let i = 2; i < process.argv.length; i++) {
     if (process.argv[i] === "--rounds" && process.argv[i + 1]) roundsDir = path.resolve(process.argv[++i]);
     if (process.argv[i] === "--top" && process.argv[i + 1]) topN = parseInt(process.argv[++i], 10);
+    if (process.argv[i] === "--burn-in" && process.argv[i + 1]) {
+      const v = parseInt(process.argv[++i], 10);
+      if (Number.isFinite(v) && v >= 1) burnIn = v;
+    }
     if (process.argv[i] === "--predictors" && process.argv[i + 1]) {
       predictors = process.argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
     }
@@ -229,8 +259,12 @@ function main() {
   const history = loadRounds(roundsDir);
   console.log(`Loaded ${history.length} rounds from ${roundsDir}`);
   console.log(`Active predictors (${engine.ALGO_IDS.length}): ${engine.ALGO_IDS.join(", ")}`);
-
-  const burnIn = 1;
+  if (burnIn >= history.length) {
+    console.error(`--burn-in ${burnIn} >= ${history.length} rounds, nothing to test`);
+    process.exit(2);
+  }
+  const testN = history.length - burnIn;
+  console.log(`Burn-in: ${burnIn}  ·  Test rounds: ${testN}`);
   console.log("Pre-computing predictions...");
   const predictions = precomputePredictions(history, burnIn);
   console.log(`Pre-computed ${predictions.length} prediction steps\n`);

@@ -159,8 +159,8 @@
         <div>
           <h1 class="text-xl font-black text-white tracking-tighter uppercase">Xóc Đĩa <span
               class="text-emerald-400">Analytics + Dự đoán</span></h1>
-            <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Bộ lọc thời gian · 11 thuật toán ·
-            ensemble</p>
+            <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Bộ lọc thời gian · ensemble cấu
+            hình được · selective betting</p>
         </div>
       </div>
 
@@ -186,6 +186,34 @@
         <a href="index.html"
           class="text-[10px] font-black text-slate-400 hover:text-white border border-slate-600 rounded-lg px-3 py-2 h-[34px] flex items-center whitespace-nowrap shrink-0">Chỉ
           Analytics</a>
+      </div>
+    </div>
+
+    <!-- Cấu hình thuật toán dự đoán -->
+    <div class="stat-card rounded-2xl p-4 border-l-4 border-l-amber-500/70 flex flex-wrap gap-4 items-end">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bộ thuật toán</label>
+        <select id="predictorPreset"
+          class="bg-slate-800 border border-slate-700 text-xs rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-amber-500 text-white font-mono min-w-[280px]">
+          <option value="duo">Duo — markov + pattern (mặc định, ~60% / 69% với gate)</option>
+          <option value="markov-solo">Markov solo (~62% type, 100% coverage)</option>
+          <option value="lean-3">Lean-3 — pattern + markov + markov2 (~60%)</option>
+          <option value="slim-6">Slim-6 — 6 algos (~59%)</option>
+          <option value="baseline-11">Baseline 11 algo cũ (~55%)</option>
+        </select>
+      </div>
+      <div class="flex flex-col gap-1 min-w-[260px]">
+        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+          Ngưỡng tự tin tối thiểu để bet
+          (<span id="selectiveThresholdLabel" class="text-amber-300">50</span>%)
+        </label>
+        <input type="range" id="selectiveThreshold" min="0" max="80" step="1" value="50"
+          class="w-full accent-amber-500">
+      </div>
+      <div class="text-[10px] text-slate-500 font-mono leading-snug max-w-md">
+        Chọn bộ thuật toán → ensemble dùng subset đó.
+        Ngưỡng cao → chỉ "NÊN BET" khi confidence ≥ ngưỡng (selective betting).
+        Cài đặt lưu trên trình duyệt.
       </div>
     </div>
 

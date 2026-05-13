@@ -101,8 +101,10 @@ chmod +x run.sh
 
 `run.sh` will, in order:
 
-1. Verify Python 3.11 (or 3.12) and tkinter are installed (and print
-   the exact `brew` / python.org install hint if not).
+1. Verify **Python 3.11** and tkinter are installed (this repo is
+   developed and tested on 3.11; `run.sh` can fall back to 3.12 on PATH
+   if 3.11 is missing — see `run.sh`). Prints the exact `brew` /
+   python.org install hint if not found.
 2. Create `./venv` on first run and install everything from
    `requirements.txt` (one-time, ~5-10 minutes).
 3. Discover every `runs/detect/**/best.pt`. With one model it
@@ -124,8 +126,11 @@ across macOS Spaces.
 
 ## Install (manual / non-macOS)
 
+Use **Python 3.11** for the virtualenv (same baseline as `requirements.txt`
+comments, `run.sh`, and bundle builds in `BUILD.md`).
+
 ```bash
-python -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 # GPU-only:
@@ -155,16 +160,11 @@ pip install -r requirements.txt
 ├── dataset/
 │   ├── images/{raw,train,val}
 │   └── labels/{raw,train,val}
-├── rounds/                   # per-round PNG + JSON snapshots
+├── rounds/                   # per-round JSON from capture (PNG optional: `s` in preview or rounds_to_dataset)
 ├── analytics/
-│   ├── serve.py                 # `python -m analytics.serve` - static HTML +
-│   │                            #   /api/rounds.json endpoint
-│   ├── index.html               # dashboard (Tailwind CDN)
-│   ├── index-with-prediction.html  # analytics + 7 heuristic predictors + ensemble UI
-│   ├── app.js                   # Chẵn/Lẻ + vị stats + Big Road renderer
-│   ├── app-with-prediction.js   # polls API + prediction panels + backtest/export hooks
-│   ├── prediction-engine.js     # pure JS: pattern / streak / freq / Markov / hot-cold / time + ensemble
-│   └── prediction-engine.test.js   # `node --test analytics/prediction-engine.test.js`
+│   ├── serve.py                 # `python -m analytics.serve` — static from analytics/ +
+│   │                            #   GET /api/rounds.json (?tail=N)
+│   └── frame-predict.html       # bảng cầu + dự đoán (poll API; state trong localStorage)
 └── tools/
     ├── rounds_to_dataset.py          # copy rounds/*.png into dataset/images/raw/
     ├── migrate_labels_15class.py     # one-shot: 17-class -> 15-class label remap
@@ -174,6 +174,8 @@ pip install -r requirements.txt
     ├── check_labels.py               # label QA / imbalance warnings
     └── eval.py                       # per-class mAP / P / R on the val split
 ```
+
+A fuller tree (e.g. `run.sh`, `tests/`, packaging scripts) lives in [`structure.md`](structure.md).
 
 ## End-to-end workflow
 
@@ -376,26 +378,25 @@ matching version for your Python). On other platforms or when those
 packages aren't installed the dialog falls back to drag-ROI with a
 clear log message.
 
-### Analytics dashboard
+### Analytics (`frame-predict`)
 
-`analytics/` is a small static page that reads the `rounds/*.json`
-dumps written by `realtime_capture.py` and renders a Chẵn/Lẻ
-progress card, per-dice-combo (4-trắng / 3T1Đ / 2T2Đ / 3Đ1T / 4-đỏ)
-stats, and a Baccarat-style 6-row Big Road. It polls `/api/rounds.json`
-every 3 seconds so a live capture session updates the dashboard in
-the browser without a reload.
+`analytics/serve.py` serves the `analytics/` folder and exposes
+`GET /api/rounds.json` (optional `?tail=N` for the last *N* rounds).
+[`frame-predict.html`](analytics/frame-predict.html) is a self-contained
+page that polls that API and draws the bead-plate style frame plus
+local prediction UX; persistence is **localStorage** in the browser
+(not a server-side history file).
 
 ```bash
 # From the repo root, with realtime_capture.py writing to ./rounds
 python -m analytics.serve                          # http://127.0.0.1:8000
 python -m analytics.serve --rounds-dir ~/captures/rounds --port 8080
+# Rounds written by the macOS app (see USER_GUIDE.md):
+python -m analytics.serve --rounds-dir ~/Documents/XocDia/rounds --port 8000
 ```
 
-The time-range filter defaults to `[first round, latest round]` and
-follows new rounds automatically. Click `AUTO` (or edit either date)
-to pin a historical window; click again to re-enable follow.
-
-**Prediction view:** open [http://127.0.0.1:8000/index-with-prediction.html](http://127.0.0.1:8000/index-with-prediction.html) (same server). It reuses the same charts and filters, runs seven heuristic predictors (including one that reads `percent` + `bets` from each round JSON when present) plus a weighted ensemble, tracks live exact/chẵn-lẻ hit rates after each new round from `realtime_capture`, supports walk-forward **backtest** on the filtered range, optional browser notifications when confidence and consensus are high, and JSON/CSV export. The predictors are exploratory only: fair rounds are independent, so long-run accuracy should stay near random baselines (~20% exact digit, ~50% parity); use the backtest panel to compare the ensemble to the bundled random and “repeat last outcome” baselines instead of treating high short-run percentages as an edge.
+Open [http://127.0.0.1:8000/frame-predict.html](http://127.0.0.1:8000/frame-predict.html).
+Add `--tunnel` if you want a public quick-tunnel URL (see `serve.py` docstring).
 
 ## Packaging as `XocDia.app` (macOS bundle)
 

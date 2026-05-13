@@ -8,7 +8,8 @@
 #   ./run.sh --no-diag         # forwarded to realtime_capture.py
 #
 # What it does:
-#   1) Locates a Python 3.11 interpreter (or aborts with install hint).
+#   1) Prefers Python 3.11 on PATH; falls back to 3.12 if 3.11 is missing
+#      (repo is developed on 3.11 — see README / BUILD.md).
 #   2) Creates ./venv if it doesn't exist.
 #   3) Installs requirements.txt the first time (cached via a marker
 #      file so subsequent launches are instant).
@@ -38,9 +39,9 @@ done
 
 if [ -z "$PY" ]; then
   cat >&2 <<'MSG'
-ERROR: Python 3.11 (or 3.12) was not found on PATH.
+ERROR: Neither Python 3.11 nor 3.12 was found on PATH.
 
-Install Python 3.11 from one of:
+Install Python 3.11 (recommended for this repo) from one of:
   * https://www.python.org/downloads/macos/
   * brew install python@3.11
 

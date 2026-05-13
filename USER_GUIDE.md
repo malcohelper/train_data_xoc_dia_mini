@@ -93,8 +93,12 @@ Mỗi round tạo 1 file JSON, ví dụ
 }
 ```
 
-(Đang chuẩn bị tooling để hiển thị các round dưới dạng dashboard ngay
-trong app — tạm thời mở file JSON bằng bất kỳ editor nào.)
+**Chỉ dùng `XocDia.app`:** mở từng file JSON bằng editor hoặc công cụ bạn
+quen (app không nhúng trình duyệt phân tích).
+
+**Có bản clone repo (dev):** có thể xem cùng dữ liệu dưới dạng bảng cầu +
+dự đoán trong trình duyệt bằng `frame-predict.html` — xem mục **§7** và
+[`README.md`](README.md) (mục Analytics).
 
 ## 5. Sự cố thường gặp
 
@@ -156,61 +160,34 @@ Quyền Screen Recording vẫn còn trong System Settings — gỡ thủ công n
 cần (System Settings → Privacy & Security → Screen Recording → tìm
 XocDia → trừ icon "−").
 
-## 7. Mô phỏng Backtest trên thư mục `rounds/` (Node.js)
+## 7. Phân tích web (`analytics/`)
 
-Dùng khi bạn đã có **nhiều file JSON** (ví dụ copy từ
-`~/Documents/XocDia/rounds/` hoặc dùng thư mục `rounds/` trong repo dev).
-Script **không cần `npm install`**, chỉ cần **Node.js 18+** (có sẵn `node`).
+> **Đối tượng:** mục này dành cho người **clone repo** và chạy **Python 3.11**
+> ở máy dev (cùng chuẩn với `venv` / `run.sh` trong repo). Gói `XocDia.app`
+> không kèm `python -m analytics.serve` — người chỉ cài app xem mục **§4**.
 
-### Cách chạy (từ thư mục gốc của project)
+Repo chỉ giữ **`frame-predict.html`** (bảng cầu + dự đoán trong trình duyệt)
+và **`serve.py`** (phục vụ thư mục `analytics/` + API `GET /api/rounds.json`,
+tuỳ chọn `?tail=N`). Các script Node backtest / engine heuristic cũ đã được
+gỡ; muốn khôi phục có thể lấy lại từ lịch sử git.
 
-```bash
-# Chạy mặc định: đọc ./rounds, burn-in 40, ghi analytics/backtest-report.json
-node analytics/run-backtest-rounds.js
-```
-
-Các tùy chọn thường dùng:
+### Chạy server (từ thư mục gốc project)
 
 ```bash
-# Chỉ định file báo cáo đầu ra
-node analytics/run-backtest-rounds.js --out ./analytics/backtest-report.json
-
-# Đổi số phiên “nạp đà” (mặc định 40; từ phiên 41 trở đi mới tính %)
-node analytics/run-backtest-rounds.js --burn-in 60
-
-# Trỏ sang thư mục JSON khác (vd. bản copy từ máy chơi)
-node analytics/run-backtest-rounds.js --rounds /đường/dẫn/tới/rounds
-
-# Thử nghiệm: tăng β (đè bẹp thuật toán yếu mạnh hơn)
-node analytics/run-backtest-rounds.js --beta 4
-
-# Trả H về dạng có trộn cả tỉ lệ đúng “vị” (không chỉ Chẵn/Lẻ)
-node analytics/run-backtest-rounds.js --hit-blend-exact 0.55
+python -m analytics.serve
+# Hoặc trỏ tới bản rounds của app (hoặc thư mục JSON khác) và đổi cổng:
+python -m analytics.serve --rounds-dir ~/Documents/XocDia/rounds --port 8080
 ```
 
-### Script làm gì (tóm tắt)
+Mở trình duyệt tại **`http://127.0.0.1:8000/frame-predict.html`** (hoặc
+`http://<LAN-IP>:8000/...` nếu bind `0.0.0.0`). Thêm `--tunnel` nếu cần URL
+public qua cloudflared (xem docstring trong `serve.py`).
 
-1. **Đọc** mọi `*.json` trong thư mục, **sắp xếp theo tên file** (định dạng
-   `YYYYMMDD_HHmmss` → thứ tự đúng thời gian).
-2. **Chuyển** mỗi file sang `RoundItem` (trường `red`, `type`, `time`,
-   `percent`, `bets`, …) giống chuẩn `prediction-engine.js`.
-3. **Tạm thời** chỉnh engine cho lần chạy này: mặc định **`HIT_BLEND_EXACT = 0`**
-   (điểm H trong ensemble chỉ dựa **Chẵn/Lẻ**, không nhấn “đúng vị”), và
-   **`BETA = 2`**. Sau khi xong, giá trị trong `prediction-engine.js` **được khôi phục** —
-   không làm bẩn cấu hình khi bạn mở analytics trên trình duyệt.
-4. Gọi **walk-forward** `runBacktest` + **`runBaselines`** (random / lặp lại cửa trước).
-5. In kết quả ra **terminal** và ghi **JSON** (động / tĩnh, `byAlgo`, file lỗi nếu có).
+### Lưu ý
 
-### Lưu ý quan trọng
-
-- **Không phải lời khuyên cờ bạc.** Backtest chỉ đo mô hình heuristic trên
-  dữ liệu đã ghi; quá khứ **không** đảm bảo tương lai.
-- **Chất lượng dữ liệu:** file thiếu `dice_result` hoặc sai khóa sẽ vào mục
-  `skipped` trong báo cáo — nên kiểm tra nếu số “bỏ qua” lớn.
-- **Cùng một bộ rounds:** so sánh Động vs Tĩnh và các TT mới có ý nghĩa khi
-  mọi lần chạy dùng **cùng thư mục và cùng thứ tự** file.
-- **Thời gian chạy:** vài trăm đến vài nghìn file có thể mất vài giây đến vài
-  chục giây tùy máy (mỗi bước gọi lại ensemble).
-- **Tham số `--beta` / `--hit-blend-exact`:** chỉ áp trong **phiên chạy script**;
-  nếu muốn đổi mặc định cho UI, phải sửa **DYNAMIC_ENSEMBLE** trong
-  `analytics/prediction-engine.js` riêng.
+- Trang poll API định kỳ; khi thư mục `--rounds-dir` có thêm file round
+  JSON mới (vd. từ `realtime_capture.py` trong repo, hoặc từ
+  `~/Documents/XocDia/rounds` nếu bạn chỉ định đúng đường dẫn đó), khung
+  cầu cập nhật theo.
+- Cấu hình / lịch sử dự đoán trên trang lưu trong **localStorage**, không qua
+  file `prediction_history.json` trên server nữa.

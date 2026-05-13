@@ -35,8 +35,9 @@ Compressed zip: ~300 – 500 MB.
 ## Prerequisites
 
 1. **macOS 12.3+** (ScreenCaptureKit lives there).
-2. **Python 3.11** (3.12 works in our testing too, but PyInstaller +
-   paddle are most-tested on 3.11). Run inside the project virtualenv:
+2. **Python 3.11** — đây là phiên bản dùng hàng ngày trong repo; PyInstaller
+   và Paddle được kiểm tra chủ yếu trên 3.11. (3.12 có thể dùng thử; khi lệch
+   hãy quay về 3.11.) Chạy trong virtualenv của project:
 
    ```bash
    source venv/bin/activate

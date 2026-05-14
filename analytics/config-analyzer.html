@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Config Analyzer — Xóc Đĩa</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0b1120;color:#e2e8f0;min-height:100vh;font-size:13px}
+#app{max-width:1100px;margin:0 auto;padding:14px;display:flex;flex-direction:column;gap:12px}
+h2{font-size:14px;font-weight:600;color:#f1f5f9}
+.card{background:#1e293b;border:1px solid #2d3f55;border-radius:12px;padding:14px}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+button{cursor:pointer;border:none;border-radius:7px;font-size:12px;font-weight:500;padding:6px 12px;transition:all .15s}
+.btn-primary{background:#2563eb;color:#fff}.btn-primary:hover{background:#1d4ed8}
+.btn-primary:disabled{background:#1e3a6e;color:#475569;cursor:not-allowed}
+.btn-secondary{background:#2d3f55;color:#cbd5e1}.btn-secondary:hover{background:#3a5068}
+.btn-green{background:#15803d;color:#fff}.btn-green:hover{background:#166534}
+.btn-sm{padding:4px 8px;font-size:11px}
+input[type=number],input[type=text]{background:#0f172a;border:1px solid #2d3f55;border-radius:7px;color:#e2e8f0;padding:6px 10px;font-size:12px;outline:none;width:100%}
+input[type=number]:focus,input[type=text]:focus{border-color:#3b82f6}
+label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;font-weight:500}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2d3f55;border-radius:3px}
+
+/* PROGRESS */
+#prog-bar-wrap{background:#0f172a;border-radius:6px;height:8px;overflow:hidden;margin-top:8px}
+#prog-bar{height:100%;background:linear-gradient(90deg,#2563eb,#7c3aed);width:0%;transition:width .2s;border-radius:6px}
+
+/* RESULTS */
+#results{display:flex;flex-direction:column;gap:8px}
+.cfg-card{background:#111827;border:1px solid #2d3f55;border-radius:10px;overflow:hidden}
+.cfg-card.hit-high{border-color:#22c55e}
+.cfg-card.hit-mid{border-color:#f59e0b}
+.cfg-card.hit-low{border-color:#475569}
+.cfg-header{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none}
+.cfg-header:hover{background:#1a2535}
+.cfg-name{font-weight:700;font-size:13px;flex:1;min-width:0}
+.cfg-badges{display:flex;gap:5px;flex-shrink:0;align-items:center}
+.badge{padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700}
+.b-bet{background:#14532d;color:#4ade80}
+.b-nobet{background:#292524;color:#a8a29e}
+.b-nodata{background:#1e293b;color:#475569}
+.rate-pill{font-size:13px;font-weight:800;padding:2px 8px;border-radius:6px}
+.rate-high{color:#4ade80;background:#052e16}
+.rate-mid{color:#fbbf24;background:#1c1204}
+.rate-low{color:#f87171;background:#1c0a0a}
+
+.cfg-body{padding:0 14px 14px;border-top:1px solid #1e2e42}
+.cfg-body.hidden{display:none}
+
+/* mini pattern viz */
+.pat-viz{display:flex;gap:3px;align-items:flex-start;flex-shrink:0}
+.pv-col{display:flex;flex-direction:column;gap:2px}
+.pv-cell{width:14px;height:14px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:#fff}
+.pv-chan{background:#1d4ed8}.pv-le{background:#b91c1c}
+.pv-arrow{color:#334155;font-size:12px;align-self:flex-start;padding:1px 3px}
+.pv-pred{width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;align-self:flex-start}
+
+/* stats grid */
+.stats-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:10px 0}
+.stat-box{background:#0f172a;border:1px solid #1e2e42;border-radius:8px;padding:8px 12px}
+.stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#475569;margin-bottom:3px}
+.stat-val{font-size:20px;font-weight:800;line-height:1}
+.stat-sub{font-size:10px;color:#475569;margin-top:2px}
+
+/* context table */
+.ctx-title{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin:10px 0 6px}
+.ctx-table{width:100%;border-collapse:collapse;font-size:11px}
+.ctx-table th{text-align:left;color:#475569;font-weight:500;padding:4px 8px;border-bottom:1px solid #1e2e42;font-size:10px;text-transform:uppercase}
+.ctx-table td{padding:5px 8px;border-bottom:1px solid #111827;vertical-align:middle}
+.ctx-table tr:last-child td{border-bottom:none}
+.ctx-table tr:hover td{background:#131e2e}
+.bar{display:inline-block;height:6px;border-radius:3px;vertical-align:middle;margin-left:4px}
+.bar-c{background:#2563eb}.bar-l{background:#b91c1c}
+
+/* recency */
+.recency-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+
+/* apply btn */
+.apply-wrap{display:flex;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid #1e2e42;align-items:center}
+.apply-status{font-size:11px;color:#64748b}
+
+/* filter bar */
+.filter-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.filter-btn{padding:4px 10px;border-radius:5px;font-size:11px;background:#1e293b;color:#64748b;border:1px solid #2d3f55}
+.filter-btn.active{background:#1e3a5f;color:#60a5fa;border-color:#2563eb}
+/* occ filter */
+.occ-btn{padding:3px 9px;border-radius:5px;font-size:11px;background:#0f172a;color:#64748b;border:1px solid #2d3f55;cursor:pointer}
+.occ-btn:hover{background:#1e293b;color:#94a3b8}
+.occ-btn.active{background:#2e1b69;color:#a78bfa;border-color:#7c3aed}
+/* cfg off state */
+.cfg-card.is-off{opacity:.5}
+.cfg-card.is-off .cfg-header:hover{background:#111827}
+/* toggle switch */
+.sw{position:relative;width:32px;height:18px;flex-shrink:0}
+.sw input{opacity:0;width:0;height:0}
+.sw-bar{position:absolute;inset:0;background:#2d3f55;border-radius:9px;cursor:pointer;transition:.2s}
+.sw-bar::before{content:'';position:absolute;width:12px;height:12px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked+.sw-bar{background:#2563eb}
+.sw input:checked+.sw-bar::before{transform:translateX(14px)}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- HEADER -->
+<div class="card" style="padding:10px 14px">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <span style="font-size:17px;font-weight:700">🔬 Config Analyzer</span>
+      <span style="color:#3d5166;font-size:12px;margin-left:8px">Xóc Đĩa — Phân tích thuật toán per-config</span>
+    </div>
+    <div style="font-size:11px;color:#3d5166" id="status-bar">Chưa tải dữ liệu</div>
+  </div>
+</div>
+
+<!-- LOAD + SETTINGS -->
+<div class="card">
+  <div class="card-header"><h2>1. Tải dữ liệu</h2></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+    <!-- Rounds folder -->
+    <div>
+      <label>Thư mục rounds (chứa file .json)</label>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+        <button class="btn-secondary" id="btn-pick-dir">📁 Chọn thư mục rounds</button>
+        <input type="file" id="rounds-dir-input" webkitdirectory multiple style="display:none" aria-hidden="true">
+        <span id="dir-info" style="font-size:11px;color:#475569">Chưa chọn</span>
+      </div>
+      <div id="rounds-status" style="font-size:11px;color:#64748b;margin-top:4px"></div>
+    </div>
+
+    <!-- Config file -->
+    <div>
+      <label>File cấu hình khung (.json)</label>
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+        <button class="btn-secondary" id="btn-pick-cfg">📋 Chọn file config</button>
+        <input type="file" id="cfg-file-input" accept=".json" style="display:none">
+        <span id="cfg-info" style="font-size:11px;color:#475569">Hoặc dùng config từ frame-predict</span>
+      </div>
+      <div style="margin-top:4px">
+        <button class="btn-sm btn-secondary" id="btn-load-ls">Dùng config từ localStorage</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div class="card">
+  <div class="card-header"><h2>2. Cài đặt phân tích</h2></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+    <div>
+      <label>Ngưỡng bet (%)</label>
+      <input type="number" id="inp-threshold" value="70" min="50" max="95" step="1" style="margin-top:6px">
+      <div style="font-size:10px;color:#475569;margin-top:3px">Hit rate ≥ ngưỡng → BET</div>
+    </div>
+    <div>
+      <label>Số cột tiền cảnh tối đa</label>
+      <input type="number" id="inp-ctx-depth" value="2" min="1" max="14" step="1" style="margin-top:6px">
+      <div style="font-size:10px;color:#475569;margin-top:3px">Khuyến nghị: 1–2 cột (nhiều hơn → nhóm quá nhỏ)</div>
+    </div>
+    <div>
+      <label>Cỡ mẫu tối thiểu hiển thị</label>
+      <input type="number" id="inp-min-sample" value="2" min="1" max="20" step="1" style="margin-top:6px">
+      <div style="font-size:10px;color:#475569;margin-top:3px">Nhóm < N lần → ⚠️ ít mẫu (vẫn hiện, dùng cẩn thận)</div>
+    </div>
+  </div>
+  <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+    <button class="btn-primary" id="btn-analyze" disabled>▶ Phân tích tất cả configs</button>
+    <span id="analyze-status" style="font-size:11px;color:#64748b"></span>
+  </div>
+  <div id="prog-bar-wrap" style="display:none"><div id="prog-bar"></div></div>
+</div>
+
+<!-- FILTER + EXPORT -->
+<div id="result-controls" style="display:none">
+  <div class="card" style="padding:10px 14px;display:flex;flex-direction:column;gap:10px">
+
+    <!-- Row 1: Tabs -->
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div class="filter-bar">
+        <span style="font-size:11px;color:#64748b">Loại:</span>
+        <button class="filter-btn active" data-filter="all">Tất cả <span class="tab-count"></span></button>
+        <button class="filter-btn" data-filter="bet">🎯 Nên BET <span class="tab-count"></span></button>
+        <button class="filter-btn" data-filter="nobet">👁 Chỉ dự đoán <span class="tab-count"></span></button>
+        <button class="filter-btn" data-filter="changed">⚡ Thay đổi <span class="tab-count"></span></button>
+        <button class="filter-btn" data-filter="nodata">Không có data <span class="tab-count"></span></button>
+        <button class="filter-btn" data-filter="off">🔴 Không kích hoạt <span class="tab-count"></span></button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-green btn-sm" id="btn-apply-all">✓ Áp dụng tất cả gợi ý</button>
+        <button class="btn-secondary btn-sm" id="btn-export">↓ Export JSON</button>
+      </div>
+    </div>
+
+    <!-- Row 2: Số lần ra -->
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid #1e2e42">
+      <span style="font-size:11px;color:#64748b;white-space:nowrap">Số lần xuất hiện ≥</span>
+      <div class="filter-bar">
+        <button class="occ-btn active" data-occ="0">Tất cả</button>
+        <button class="occ-btn" data-occ="3">≥ 3</button>
+        <button class="occ-btn" data-occ="5">≥ 5</button>
+        <button class="occ-btn" data-occ="10">≥ 10</button>
+        <button class="occ-btn" data-occ="20">≥ 20</button>
+        <button class="occ-btn" data-occ="50">≥ 50</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px">
+        <span style="font-size:11px;color:#475569">Tự nhập:</span>
+        <input type="number" id="inp-min-occ" value="0" min="0" max="9999" step="1"
+          style="width:64px;padding:4px 8px;font-size:11px">
+      </div>
+      <span id="occ-info" style="font-size:11px;color:#475569"></span>
+    </div>
+
+  </div>
+</div>
+
+<!-- RESULTS -->
+<div id="results"></div>
+
+</div><!-- #app -->
+
+<script>
+"use strict";
+
+/* ──────────────────────────────────────
+   STATE
+────────────────────────────────────── */
+const CFG_LS_KEY = 'xd_frame_cfg_v1';
+const DICE_TO_RED = {'4_red':4,'3r_1w':3,'2w_2r':2,'3w_1r':1,'4_white':0};
+const MAX_ROWS = 6;
+
+let allRounds   = [];   // raw round objects sorted chronologically
+let configs     = [];   // loaded configs
+let analysisResults = {}; // id → analysis result
+let currentFilter = 'all';
+let minOcc        = 0;   // filter số lần xuất hiện tối thiểu
+
+/* ──────────────────────────────────────
+   HELPERS
+────────────────────────────────────── */
+function getRoundType(r) {
+  if (r.type === 'chan' || r.type === 'le') return r.type;
+  const red = DICE_TO_RED[r.dice_result];
+  return red != null ? (red % 2 === 0 ? 'chan' : 'le') : null;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function pct(c, t) {
+  return t === 0 ? '—' : (c / t * 100).toFixed(1) + '%';
+}
+
+function rateColor(rate) {
+  if (rate >= 0.70) return '#4ade80';
+  if (rate >= 0.60) return '#fbbf24';
+  if (rate >= 0.50) return '#94a3b8';
+  return '#f87171';
+}
+
+function rateClass(rate) {
+  if (rate >= 0.70) return 'rate-high';
+  if (rate >= 0.60) return 'rate-mid';
+  return 'rate-low';
+}
+
+/* ──────────────────────────────────────
+   COLUMN HISTORY BUILDER
+   Builds an array of complete columns from all rounds.
+   Each column: {type, count, startIdx, endIdx}
+────────────────────────────────────── */
+function buildColumnHistory(rounds) {
+  const cols = [];
+  for (let i = 0; i < rounds.length; i++) {
+    const t = getRoundType(rounds[i]);
+    if (!t) continue;
+    if (!cols.length) {
+      cols.push({ type: t, count: 1, start: i, end: i });
+    } else {
+      const last = cols[cols.length - 1];
+      if (last.type === t && last.count < MAX_ROWS) {
+        last.count++;
+        last.end = i;
+      } else {
+        cols.push({ type: t, count: 1, start: i, end: i });
+      }
+    }
+  }
+  return cols;
+}
+
+/* ──────────────────────────────────────
+   ANALYSIS ENGINE
+   For a given config, find all pattern occurrences in column history,
+   record pre-context (up to ctxDepth cols before pattern) + next outcome.
+────────────────────────────────────── */
+function analyzeConfig(cfg, cols, rounds, threshold, ctxDepth, minSample) {
+  const P = cfg.pattern.length;
+  const total = rounds.length;
+  const RECENT_N = Math.min(500, Math.floor(total * 0.1));
+  const recentStart = total - RECENT_N;
+
+  const result = {
+    occurrences: 0,
+    outcomes:    { chan: 0, le: 0 },
+    recent:      { chan: 0, le: 0 },
+    old:         { chan: 0, le: 0 },
+    contexts:    {},   // ctxKey → {cols, count, chan, le}
+    recommendation: null,
+  };
+
+  for (let i = P; i <= cols.length; i++) {
+    // Match pattern against cols[i-P .. i-1]
+    let match = true;
+    for (let j = 0; j < P; j++) {
+      const c = cols[i - P + j];
+      const p = cfg.pattern[j];
+      if (c.type !== p.type || c.count !== p.rows) { match = false; break; }
+    }
+    if (!match) continue;
+
+    // Next round after last pattern column
+    const lastCol   = cols[i - 1];
+    const nextIdx   = lastCol.end + 1;
+    if (nextIdx >= rounds.length) continue;
+
+    const outcome = getRoundType(rounds[nextIdx]);
+    if (!outcome) continue;
+
+    result.occurrences++;
+    result.outcomes[outcome]++;
+
+    // Recency
+    if (nextIdx >= recentStart) result.recent[outcome]++;
+    else result.old[outcome]++;
+
+    // Pre-context: up to ctxDepth columns before pattern start
+    const ctxEnd   = i - P;            // exclusive
+    const ctxStart = Math.max(0, ctxEnd - ctxDepth);
+    const ctxCols  = cols.slice(ctxStart, ctxEnd);
+    const ctxKey   = ctxCols.map(c => `${c.count}${c.type[0]}`).join('|');
+
+    if (!result.contexts[ctxKey]) {
+      result.contexts[ctxKey] = {
+        colDefs: ctxCols.map(c => ({ type: c.type, rows: c.count })),
+        count: 0, chan: 0, le: 0,
+      };
+    }
+    result.contexts[ctxKey].count++;
+    result.contexts[ctxKey][outcome]++;
+  }
+
+  if (result.occurrences === 0) {
+    result.recommendation = null;
+    return result;
+  }
+
+  // Overall best prediction
+  const chanRate = result.outcomes.chan / result.occurrences;
+  const bestType = chanRate >= 0.5 ? 'chan' : 'le';
+  const bestRate = Math.max(chanRate, 1 - chanRate);
+
+  // Tất cả tiền cảnh, sort theo count giảm dần rồi hitRate
+  // minSample chỉ dùng để đánh dấu "ít mẫu", không lọc bỏ
+  const topCtx = Object.values(result.contexts)
+    .map(g => ({
+      ...g,
+      hitRate:      g[bestType] / g.count,
+      bestType,
+      lowSample:    g.count < minSample,  // ⚠️ ít mẫu
+    }))
+    .sort((a, b) => b.count - a.count || b.hitRate - a.hitRate)
+    .slice(0, 10);
+
+  // Best context-specific recommendation
+  const bestCtx = topCtx.length > 0 ? topCtx[0] : null;
+  const ctxHitRate = bestCtx ? bestCtx.hitRate : bestRate;
+
+  result.recommendation = {
+    predictType: bestType,
+    overallRate: bestRate,
+    shouldBet:   bestRate >= threshold / 100,
+    topContexts: topCtx,
+    bestCtxRate: ctxHitRate,
+    changed: bestType !== cfg.predictType || (bestRate >= threshold / 100) !== cfg.shouldBet,
+  };
+
+  return result;
+}
+
+/* ──────────────────────────────────────
+   RUN ALL
+────────────────────────────────────── */
+async function runAnalysis() {
+  const threshold  = parseInt(document.getElementById('inp-threshold').value)  || 70;
+  const ctxDepth   = parseInt(document.getElementById('inp-ctx-depth').value)  || 5;
+  const minSample  = parseInt(document.getElementById('inp-min-sample').value) || 3;
+
+  const btn = document.getElementById('btn-analyze');
+  btn.disabled = true;
+  btn.textContent = '⏳ Đang phân tích...';
+
+  const wrap = document.getElementById('prog-bar-wrap');
+  const bar  = document.getElementById('prog-bar');
+  wrap.style.display = 'block';
+  bar.style.width = '0%';
+
+  setStatus(`Đang build column history từ ${allRounds.length} rounds...`);
+  await sleep(30);
+
+  const cols = buildColumnHistory(allRounds);
+  setStatus(`Column history: ${cols.length} cột. Đang phân tích ${configs.length} configs...`);
+  await sleep(30);
+
+  analysisResults = {};
+  for (let i = 0; i < configs.length; i++) {
+    const cfg = configs[i];
+    analysisResults[cfg.id] = analyzeConfig(cfg, cols, allRounds, threshold, ctxDepth, minSample);
+    if (i % 20 === 0) {
+      bar.style.width = Math.round((i / configs.length) * 100) + '%';
+      document.getElementById('analyze-status').textContent = `${i + 1} / ${configs.length}`;
+      await sleep(0);
+    }
+  }
+
+  bar.style.width = '100%';
+  await sleep(100);
+  wrap.style.display = 'none';
+
+  btn.disabled = false;
+  btn.textContent = '▶ Phân tích lại';
+
+  const withData  = Object.values(analysisResults).filter(r => r.occurrences > 0).length;
+  const shouldBet = Object.values(analysisResults).filter(r => r.recommendation?.shouldBet).length;
+  setStatus(`✅ Xong — ${withData}/${configs.length} configs có data · ${shouldBet} nên BET`);
+
+  document.getElementById('result-controls').style.display = 'block';
+  renderResults();
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ──────────────────────────────────────
+   RENDER
+────────────────────────────────────── */
+function renderResults() {
+  const threshold = parseInt(document.getElementById('inp-threshold').value) || 70;
+  const container = document.getElementById('results');
+  container.innerHTML = '';
+
+  let filtered = configs.filter(cfg => {
+    const r   = analysisResults[cfg.id];
+    const occ = r?.occurrences ?? 0;
+
+    // Filter theo loại
+    if (currentFilter === 'bet')     { if (!(cfg.enabled !== false && r?.recommendation?.shouldBet)) return false; }
+    else if (currentFilter === 'nobet')   { if (!(cfg.enabled !== false && r && !r.recommendation?.shouldBet && occ > 0)) return false; }
+    else if (currentFilter === 'changed') { if (!r?.recommendation?.changed) return false; }
+    else if (currentFilter === 'nodata')  { if (!(!r || occ === 0)) return false; }
+    else if (currentFilter === 'off')     { if (cfg.enabled !== false) return false; }
+
+    // Filter theo số lần xuất hiện
+    if (minOcc > 0 && occ < minOcc) return false;
+
+    return true;
+  });
+
+  // Cập nhật occ-info
+  const occInfo = document.getElementById('occ-info');
+  if (occInfo) {
+    occInfo.textContent = minOcc > 0
+      ? `→ ${filtered.length} cấu hình xuất hiện ≥ ${minOcc} lần`
+      : `→ ${filtered.length} cấu hình`;
+  }
+
+  document.getElementById('analyze-status').textContent =
+    `Hiển thị ${filtered.length} / ${configs.length} configs`;
+
+  for (const cfg of filtered) {
+    const card = buildCfgCard(cfg, analysisResults[cfg.id], threshold);
+    card.dataset.cfgId = cfg.id;   // để toggleCfgEnabled tìm card
+    container.appendChild(card);
+  }
+
+  updateFilterCounts();
+}
+
+function buildCfgCard(cfg, res, threshold) {
+  const card = document.createElement('div');
+
+  if (!res || res.occurrences === 0) {
+    card.className = `cfg-card hit-low${cfg.enabled === false ? ' is-off' : ''}`;
+    card.innerHTML = `
+      <div class="cfg-header" style="cursor:default">
+        <label class="sw" onclick="event.stopPropagation()" title="${cfg.enabled===false?'Bật':'Tắt'} cấu hình">
+          <input type="checkbox" ${cfg.enabled!==false?'checked':''} onchange="toggleCfgEnabled('${cfg.id}',this.checked,event)">
+          <span class="sw-bar"></span>
+        </label>
+        ${patViz(cfg)}
+        <div class="cfg-name" style="margin-left:8px">${esc(cfg.name)}</div>
+        <div class="cfg-badges">
+          <span class="badge b-nodata">Không có data</span>
+        </div>
+      </div>`;
+    return card;
+  }
+
+  const rec  = res.recommendation;
+  const rate = rec ? rec.overallRate : 0;
+  const cardClass = rate >= 0.70 ? 'hit-high' : rate >= 0.60 ? 'hit-mid' : 'hit-low';
+  card.className = `cfg-card ${cardClass}${cfg.enabled === false ? ' is-off' : ''}`;
+
+  // Determine suggested vs original difference
+  const suggestType = rec?.predictType || cfg.predictType;
+  const suggestBet  = rec?.shouldBet ?? cfg.shouldBet;
+  const changed = rec?.changed;
+
+  const chanCount = res.outcomes.chan;
+  const leCount   = res.outcomes.le;
+  const total     = res.occurrences;
+
+  // Recent trend
+  const rTotal  = res.recent.chan + res.recent.le;
+  const rChan   = rTotal > 0 ? res.recent.chan / rTotal : null;
+
+  const id = `cfg-${cfg.id}`;
+
+  card.innerHTML = `
+    <div class="cfg-header" onclick="toggleBody('${id}')">
+      <label class="sw" onclick="event.stopPropagation()" title="${cfg.enabled===false?'Bật':'Tắt'} cấu hình">
+        <input type="checkbox" ${cfg.enabled!==false?'checked':''} onchange="toggleCfgEnabled('${cfg.id}',this.checked,event)">
+        <span class="sw-bar"></span>
+      </label>
+      ${patViz(cfg, rec)}
+      <div class="cfg-name" style="margin-left:8px">
+        ${esc(cfg.name)}
+        ${changed ? '<span style="font-size:10px;color:#f59e0b;margin-left:4px">⚡ thay đổi</span>' : ''}
+      </div>
+      <div class="cfg-badges">
+        <span class="rate-pill ${rateClass(rate)}">${pct(chanCount,total)} C / ${pct(leCount,total)} L</span>
+        <span class="badge ${suggestBet ? 'b-bet' : 'b-nobet'}">${suggestBet ? '🎯 BET' : '👁 Chỉ dự đoán'}</span>
+        <span style="font-size:11px;color:#475569">${total} lần</span>
+        <span style="color:#475569;font-size:14px">▾</span>
+      </div>
+    </div>
+
+    <div class="cfg-body hidden" id="${id}">
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="stat-label">Kết quả tổng</div>
+          <div class="stat-val" style="color:${rateColor(rate)}">${pct(Math.max(chanCount,leCount), total)}</div>
+          <div class="stat-sub">${total} lần · C:${chanCount} L:${leCount}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Gợi ý dự đoán</div>
+          <div class="stat-val" style="color:${suggestType==='chan'?'#60a5fa':'#f87171'}">${suggestType==='chan'?'CHẴN':'LẺ'}</div>
+          <div class="stat-sub">${suggestBet ? '→ Nên cá cược' : '→ Không bet'} (ngưỡng ${threshold}%)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Xu hướng gần đây (${res.recent.chan+res.recent.le} lần)</div>
+          ${rTotal > 0
+            ? `<div class="stat-val" style="color:${rateColor(Math.max(rChan,1-rChan))}">${pct(Math.round(Math.max(rChan,1-rChan)*1000)/10,100).replace('%','')+ '%'}</div>
+               <div class="stat-sub">C:${res.recent.chan} L:${res.recent.le}</div>`
+            : `<div class="stat-val" style="color:#475569">—</div><div class="stat-sub">Chưa đủ data gần đây</div>`}
+        </div>
+      </div>
+
+      <!-- BEFORE / AFTER COMPARISON -->
+      ${buildDiffPanel(cfg, rec, suggestType, suggestBet, changed, rate)}
+
+      <!-- Top contexts -->
+      ${rec?.topContexts?.length ? `
+      <div class="ctx-title">Tiền cảnh tốt nhất (trước pattern)
+        <span style="font-weight:400;color:#334155;margin-left:6px">📌 Pin để dùng làm extended trigger trong frame-predict</span>
+      </div>
+      <table class="ctx-table">
+        <thead><tr>
+          <th>Tiền cảnh → pattern</th><th>Lần</th>
+          <th>Chẵn</th><th>Lẻ</th>
+          <th>Hit rate</th><th>Bet?</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${rec.topContexts.map((g, gi) => {
+            const ctxBestType  = g.chan >= g.le ? 'chan' : 'le';
+            const hr           = g[ctxBestType] / g.count;
+            const shouldBetCtx = hr >= threshold / 100;
+            const ctxKey       = g.colDefs.map(c => c.rows + c.type[0]).join('|');
+            const isPinned     = (cfg.preContexts||[]).some(p => p.key === ctxKey);
+            const isLow        = g.lowSample;
+            const rowBg = isPinned ? '#071a14' : isLow ? '#16100a' : '';
+            return `<tr style="background:${rowBg}" id="ctx-row-${cfg.id}-${gi}">
+              <td>
+                <div style="display:flex;align-items:center;gap:4px">
+                  ${isLow ? '<span title="Ít mẫu, dùng cẩn thận" style="color:#d97706;font-size:10px">⚠️</span>' : ''}
+                  ${ctxViz(g.colDefs)}
+                  <span style="color:#334155;font-size:10px;margin:0 2px">+</span>
+                  ${patternMini(cfg.pattern)}
+                </div>
+              </td>
+              <td style="color:${isLow?'#d97706':'#94a3b8'};font-weight:${isLow?700:400}">${g.count}</td>
+              <td>${g.chan}<span class="bar bar-c" style="width:${Math.round(g.chan/g.count*40)}px"></span></td>
+              <td>${g.le}<span class="bar bar-l" style="width:${Math.round(g.le/g.count*40)}px"></span></td>
+              <td style="font-weight:700;color:${rateColor(hr)}">${pct(g[ctxBestType],g.count)}
+                <span style="font-size:10px;color:#475569;margin-left:2px">${ctxBestType==='chan'?'C':'L'}</span>
+              </td>
+              <td><span class="badge ${shouldBetCtx?'b-bet':'b-nobet'}" style="font-size:9px;opacity:${isLow?.6:1}">${shouldBetCtx?'BET':'—'}</span></td>
+              <td>
+                ${isPinned
+                  ? `<button class="btn-sm" style="background:#14532d;color:#4ade80;font-size:10px"
+                       onclick="unpinPreContext('${cfg.id}','${ctxKey}')">📌 Đã pin</button>`
+                  : `<button class="btn-sm ${isLow?'':'btn-secondary'}" style="font-size:10px;${isLow?'background:#422006;color:#fbbf24;':''}"
+                       onclick="pinPreContext('${cfg.id}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${ctxBestType}',${shouldBetCtx},${hr.toFixed(4)},${g.count})">📌 Pin${isLow?' ⚠️':''}</button>`
+                }
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div style="font-size:10px;color:#334155;margin-top:4px">
+        ⚠️ = ít mẫu (< minSample) — có thể pin nhưng dùng cẩn thận ·
+        Nếu không có tiền cảnh hữu ích: thử giảm <b>Số cột tiền cảnh</b> xuống 1
+      </div>` : `
+      <div style="font-size:11px;color:#475569;margin-top:8px;padding:8px 12px;
+                  background:#0f172a;border:1px solid #1e2e42;border-radius:7px;">
+        Không tìm được tiền cảnh.
+        ${res.occurrences > 0
+          ? `Pattern xuất hiện <b style="color:#e2e8f0">${res.occurrences} lần</b> nhưng mỗi lần đến từ con đường khác nhau.
+             <br>→ Thử giảm <b>Số cột tiền cảnh</b> về <b>1</b> để nhóm được nhiều hơn.`
+          : 'Pattern chưa xuất hiện trong lịch sử với cỡ mẫu đủ lớn.'}
+      </div>`}
+
+      <!-- Pinned pre-contexts -->
+      <div id="pinned-section-${cfg.id}">${buildPinnedSection(cfg)}</div>
+
+      <!-- Apply -->
+      <div class="apply-wrap">
+        <button class="btn-sm btn-primary" onclick="applyOne('${cfg.id}')">✓ Áp dụng gợi ý</button>
+        <span class="apply-status" id="apply-status-${cfg.id}"></span>
+      </div>
+    </div>`;
+
+  return card;
+}
+
+/* ──────────────────────────────────────
+   PATTERN MINI (nhỏ hơn patViz, dùng trong table)
+────────────────────────────────────── */
+// Pattern dạng cột/ô (giống ctxViz) — dùng trong bảng tiền cảnh
+function patternMini(pattern) {
+  return `<div style="display:flex;gap:2px;align-items:flex-start">` +
+    pattern.map(p => {
+      const bg     = p.type === 'chan' ? '#1e3fa8' : '#991b1b';  // hơi đậm hơn ctx để phân biệt
+      const border = p.type === 'chan' ? '#60a5fa' : '#f87171';
+      const lbl    = p.type === 'chan' ? 'C' : 'L';
+      const cells  = Array.from({ length: p.rows }, () =>
+        `<div style="width:16px;height:16px;border-radius:3px;background:${bg};
+                     border:2px solid ${border};display:flex;align-items:center;
+                     justify-content:center;font-size:8px;font-weight:700;color:#fff;
+                     margin-bottom:2px;">${lbl}</div>`
+      ).join('');
+      return `<div style="display:flex;flex-direction:column;">${cells}</div>`;
+    }).join('') +
+  `</div>`;
+}
+
+/* ──────────────────────────────────────
+   PINNED PRE-CONTEXTS — BUILD SECTION
+────────────────────────────────────── */
+function buildPinnedSection(cfg) {
+  const pins = cfg.preContexts || [];
+  if (!pins.length) return '';
+
+  const rows = pins.map((p, pi) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;
+                background:#071a14;border:1px solid #166534;border-radius:7px;margin-bottom:4px;">
+      <span style="font-size:12px">📌</span>
+      <div style="display:flex;align-items:center;gap:4px;flex:1">
+        ${ctxViz(p.cols)}
+        <span style="color:#334155;font-size:11px;margin:0 3px">+</span>
+        ${patternMini(cfg.pattern)}
+        <span style="color:#475569;font-size:11px;margin:0 4px">→</span>
+        <span style="font-weight:700;color:${p.predictType==='chan'?'#60a5fa':'#f87171'};font-size:12px">
+          ${p.predictType==='chan'?'CHẴN':'LẺ'}
+        </span>
+        <span class="badge ${p.shouldBet?'b-bet':'b-nobet'}" style="font-size:9px;margin-left:4px">
+          ${p.shouldBet?'BET':'Không bet'}
+        </span>
+        <span style="font-size:10px;color:#4ade80;margin-left:4px">${Math.round(p.hitRate*100)}%</span>
+        <span style="font-size:10px;color:#334155;margin-left:2px">(${p.count} lần)</span>
+      </div>
+      <button class="btn-sm" style="background:#1c0a0a;color:#f87171;font-size:10px"
+        onclick="unpinPreContext('${cfg.id}','${p.key}')">✕ Bỏ</button>
+    </div>`).join('');
+
+  return `
+    <div style="margin-top:10px">
+      <div class="ctx-title" style="color:#4ade80">
+        📌 Extended triggers đã chọn (${pins.length})
+        <span style="font-weight:400;color:#334155;margin-left:6px">
+          — sẽ được dùng trong frame-predict với độ ưu tiên cao hơn pattern đơn
+        </span>
+      </div>
+      ${rows}
+    </div>`;
+}
+
+/* ──────────────────────────────────────
+   PIN / UNPIN PRE-CONTEXT
+────────────────────────────────────── */
+function pinPreContext(cfgId, ctxKey, colDefsJson, predictType, shouldBet, hitRate, count) {
+  const cfg = configs.find(c => c.id === cfgId);
+  if (!cfg) return;
+
+  // Parse colDefs (có thể là object hoặc JSON string tuỳ cách gọi)
+  let colDefs;
+  try { colDefs = typeof colDefsJson === 'string' ? JSON.parse(colDefsJson) : colDefsJson; }
+  catch { return; }
+
+  if (!cfg.preContexts) cfg.preContexts = [];
+
+  // Không pin trùng
+  if (cfg.preContexts.some(p => p.key === ctxKey)) return;
+
+  cfg.preContexts.push({ key: ctxKey, cols: colDefs, predictType, shouldBet, hitRate, count });
+  saveCfgsToLS();
+
+  // Refresh pinned section của card này
+  const pinnedEl = document.getElementById(`pinned-section-${cfgId}`);
+  if (pinnedEl) pinnedEl.innerHTML = buildPinnedSection(cfg);
+
+  // Update nút pin trong table → đổi sang "Đã pin"
+  refreshContextTable(cfgId);
+}
+
+function unpinPreContext(cfgId, ctxKey) {
+  const cfg = configs.find(c => c.id === cfgId);
+  if (!cfg || !cfg.preContexts) return;
+
+  cfg.preContexts = cfg.preContexts.filter(p => p.key !== ctxKey);
+  saveCfgsToLS();
+
+  const pinnedEl = document.getElementById(`pinned-section-${cfgId}`);
+  if (pinnedEl) pinnedEl.innerHTML = buildPinnedSection(cfg);
+
+  refreshContextTable(cfgId);
+}
+
+// Re-render chỉ phần context table của 1 card (không rebuild toàn bộ)
+function refreshContextTable(cfgId) {
+  const threshold = parseInt(document.getElementById('inp-threshold').value) || 70;
+  const cfg = configs.find(c => c.id === cfgId);
+  const res = analysisResults[cfgId];
+  if (!cfg || !res?.recommendation) return;
+
+  const rec = res.recommendation;
+  const suggestType = rec.predictType;
+
+  rec.topContexts.forEach((g, gi) => {
+    const ctxKey   = g.colDefs.map(c => c.rows + c.type[0]).join('|');
+    const isPinned = (cfg.preContexts||[]).some(p => p.key === ctxKey);
+    const ctxBestType = g.chan >= g.le ? 'chan' : 'le';
+    const hr           = g[ctxBestType] / g.count;
+    const shouldBetCtx = hr >= threshold / 100;
+    const row = document.getElementById(`ctx-row-${cfgId}-${gi}`);
+    if (!row) return;
+
+    row.style.background = isPinned ? '#071a14' : '';
+    const tdBtn = row.querySelector('td:last-child');
+    if (tdBtn) {
+      tdBtn.innerHTML = isPinned
+        ? `<button class="btn-sm" style="background:#14532d;color:#4ade80;font-size:10px"
+             onclick="unpinPreContext('${cfgId}','${ctxKey}')">📌 Đã pin</button>`
+        : `<button class="btn-sm btn-secondary" style="font-size:10px"
+             onclick="pinPreContext('${cfgId}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${ctxBestType}',${shouldBetCtx},${hr.toFixed(4)},${g.count})">📌 Pin</button>`;
+    }
+  });
+}
+
+/* ──────────────────────────────────────
+   BEFORE / AFTER DIFF PANEL
+────────────────────────────────────── */
+function buildDiffPanel(cfg, rec, suggestType, suggestBet, changed, overallRate) {
+  // Phân tích cụ thể cái gì thay đổi
+  const typeChanged = rec && cfg.predictType !== suggestType;
+  const betChanged  = rec && cfg.shouldBet !== suggestBet;
+
+  // Nếu không thay đổi gì → hiển thị đơn giản
+  if (!changed) {
+    return `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;
+                background:#071a0e;border:1px solid #166534;border-radius:8px;margin-bottom:10px;">
+      <span style="font-size:16px">✅</span>
+      <span style="font-size:12px;color:#4ade80;font-weight:600">Không thay đổi</span>
+      <span style="font-size:11px;color:#475569">— Gợi ý của thuật toán khớp với config gốc bạn đã đặt</span>
+    </div>`;
+  }
+
+  // Helper: render 1 side (before hoặc after)
+  function side(predictType, shouldBet, label, isAfter) {
+    const typeColor  = predictType === 'chan' ? '#60a5fa' : '#f87171';
+    const betColor   = shouldBet ? '#4ade80' : '#94a3b8';
+    const betLabel   = shouldBet ? '🎯 BET' : '👁 Không bet';
+    const borderCol  = isAfter ? '#f59e0b' : '#2d3f55';
+    const bgCol      = isAfter ? '#1c1204' : '#0f172a';
+    const labelColor = isAfter ? '#f59e0b' : '#475569';
+
+    return `
+    <div style="flex:1;background:${bgCol};border:1px solid ${borderCol};border-radius:9px;padding:12px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:${labelColor};
+                  font-weight:700;margin-bottom:10px;">${label}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        ${miniPatVizFull(cfg.pattern, predictType, shouldBet)}
+      </div>
+      <div style="font-size:15px;font-weight:800;color:${typeColor};margin-bottom:4px;">
+        ${predictType === 'chan' ? 'CHẴN' : 'LẺ'}
+      </div>
+      <div style="font-size:12px;font-weight:600;color:${betColor}">${betLabel}</div>
+    </div>`;
+  }
+
+  // Build change tags
+  const tags = [];
+  if (typeChanged) tags.push(`<span style="background:#7c2d04;color:#fb923c;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">
+    Dự đoán: ${cfg.predictType==='chan'?'Chẵn':'Lẻ'} → ${suggestType==='chan'?'Chẵn':'Lẻ'}
+  </span>`);
+  if (betChanged)  tags.push(`<span style="background:#1e1b4b;color:#a5b4fc;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">
+    Bet: ${cfg.shouldBet?'BET':'Không bet'} → ${suggestBet?'BET':'Không bet'}
+  </span>`);
+
+  return `
+  <div style="margin-bottom:12px;">
+    <div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;
+                letter-spacing:.04em;margin-bottom:8px;">⚡ Thay đổi so với gốc</div>
+    <div style="display:flex;gap:10px;align-items:stretch;margin-bottom:8px;">
+      ${side(cfg.predictType, cfg.shouldBet, 'TRƯỚC (config gốc)', false)}
+      <div style="display:flex;align-items:center;font-size:22px;color:#475569;flex-shrink:0;">→</div>
+      ${side(suggestType, suggestBet, 'SAU (gợi ý thuật toán)', true)}
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+      <span style="font-size:11px;color:#475569;align-self:center;">Thay đổi:</span>
+      ${tags.join('')}
+      <span style="font-size:11px;color:#475569;margin-left:4px;">
+        · Dựa trên ${Math.round(overallRate * 100)}% hit rate từ lịch sử
+      </span>
+    </div>
+  </div>`;
+}
+
+// Vẽ pattern đầy đủ + prediction cell lớn hơn cho diff panel
+function miniPatVizFull(pattern, predictType, shouldBet) {
+  const cols = pattern.map(p => {
+    const cells = Array.from({length: p.rows}, () =>
+      `<div style="width:16px;height:16px;border-radius:3px;background:${p.type==='chan'?'#1d4ed8':'#b91c1c'};
+                   display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;color:#fff;
+                   margin-bottom:2px;">${p.type==='chan'?'C':'L'}</div>`
+    ).join('');
+    return `<div>${cells}</div>`;
+  }).join('');
+
+  const predBg   = predictType === 'chan' ? '#1d4ed8' : '#b91c1c';
+  const border   = shouldBet ? '2px solid #22c55e' : '2px dashed #d97706';
+  const predCell = `<div style="width:20px;height:20px;border-radius:4px;background:${predBg};
+                               border:${border};display:flex;align-items:center;justify-content:center;
+                               font-size:10px;font-weight:700;color:#fff;align-self:flex-start;">
+                     ${predictType==='chan'?'C':'L'}</div>`;
+
+  return `<div style="display:flex;gap:3px;align-items:flex-start;">
+    ${cols}
+    <span style="color:#334155;font-size:12px;padding:0 2px;align-self:flex-start;">→</span>
+    ${predCell}
+  </div>`;
+}
+
+function patViz(cfg, rec) {
+  const cols = cfg.pattern.map(p => {
+    const cells = Array.from({length: p.rows}, () =>
+      `<div class="pv-cell ${p.type==='chan'?'pv-chan':'pv-le'}">${p.type==='chan'?'C':'L'}</div>`
+    ).join('');
+    return `<div class="pv-col">${cells}</div>`;
+  }).join('');
+
+  const pt    = rec?.predictType || cfg.predictType;
+  const isBet = rec?.shouldBet ?? cfg.shouldBet;
+  const predCell = `<div class="pv-pred" style="background:${pt==='chan'?'#1d4ed8':'#b91c1c'};border:${isBet?'2px solid #22c55e':'2px dashed #d97706'}">${pt==='chan'?'C':'L'}</div>`;
+
+  return `<div class="pat-viz">${cols}<span class="pv-arrow">→</span>${predCell}</div>`;
+}
+
+// Hiển thị cột/ô đúng dạng bảng cầu (giống patViz)
+function ctxViz(colDefs) {
+  if (!colDefs.length) return '<span style="color:#475569;font-size:11px;">—</span>';
+  return `<div style="display:flex;gap:2px;align-items:flex-start">` +
+    colDefs.map(c => {
+      const bg     = c.type === 'chan' ? '#1d4ed8' : '#b91c1c';
+      const border = c.type === 'chan' ? '#3b82f6' : '#ef4444';
+      const lbl    = c.type === 'chan' ? 'C' : 'L';
+      const cells  = Array.from({ length: c.rows }, () =>
+        `<div style="width:16px;height:16px;border-radius:3px;background:${bg};
+                     border:1px solid ${border};display:flex;align-items:center;
+                     justify-content:center;font-size:8px;font-weight:700;color:#fff;
+                     margin-bottom:2px;">${lbl}</div>`
+      ).join('');
+      return `<div style="display:flex;flex-direction:column;">${cells}</div>`;
+    }).join('') +
+  `</div>`;
+}
+
+function toggleBody(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
+
+/* ──────────────────────────────────────
+   APPLY RECOMMENDATIONS
+────────────────────────────────────── */
+/* ──────────────────────────────────────
+   TOGGLE ENABLED
+────────────────────────────────────── */
+function toggleCfgEnabled(cfgId, isEnabled, event) {
+  if (event) event.stopPropagation();
+  const cfg = configs.find(c => c.id === cfgId);
+  if (!cfg) return;
+  cfg.enabled = isEnabled;
+  saveCfgsToLS();
+
+  // Update card opacity without full re-render
+  const card = document.querySelector(`[data-cfg-id="${cfgId}"]`);
+  if (card) {
+    card.classList.toggle('is-off', !isEnabled);
+  }
+
+  // Update tab counts in filter bar
+  updateFilterCounts();
+}
+
+function updateFilterCounts() {
+  const counts = {
+    all:     configs.length,
+    bet:     configs.filter(c => c.enabled !== false && c.shouldBet).length,
+    nobet:   configs.filter(c => c.enabled !== false && !c.shouldBet).length,
+    changed: Object.values(analysisResults).filter(r => r?.recommendation?.changed).length,
+    nodata:  configs.filter(c => !analysisResults[c.id] || analysisResults[c.id].occurrences === 0).length,
+    off:     configs.filter(c => c.enabled === false).length,
+  };
+  document.querySelectorAll('.filter-btn[data-filter]').forEach(btn => {
+    const f = btn.dataset.filter;
+    const span = btn.querySelector('.tab-count');
+    if (span && counts[f] !== undefined) span.textContent = `(${counts[f]})`;
+  });
+}
+
+function applyOne(cfgId) {
+  const cfg = configs.find(c => c.id === cfgId);
+  const res = analysisResults[cfgId];
+  if (!cfg || !res?.recommendation) return;
+
+  cfg.predictType = res.recommendation.predictType;
+  cfg.shouldBet   = res.recommendation.shouldBet;
+  saveCfgsToLS();
+
+  const el = document.getElementById(`apply-status-${cfgId}`);
+  if (el) { el.textContent = '✅ Đã áp dụng'; el.style.color = '#4ade80'; }
+}
+
+function applyAll() {
+  let count = 0;
+  for (const cfg of configs) {
+    const res = analysisResults[cfg.id];
+    if (res?.recommendation) {
+      cfg.predictType = res.recommendation.predictType;
+      cfg.shouldBet   = res.recommendation.shouldBet;
+      count++;
+    }
+  }
+  saveCfgsToLS();
+  alert(`✅ Đã áp dụng gợi ý cho ${count} configs. Mở frame-predict.html để kiểm tra.`);
+  renderResults();
+}
+
+function saveCfgsToLS() {
+  localStorage.setItem(CFG_LS_KEY, JSON.stringify(configs));
+}
+
+function exportConfigs() {
+  const blob = new Blob([JSON.stringify(configs, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `xd-configs-optimized-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ──────────────────────────────────────
+   DATA LOADING
+────────────────────────────────────── */
+/* Sort key cho một round object:
+   Ưu tiên round_id (20260503_164359) vì trùng tên file.
+   Fallback: started_at ISO string. Dùng so sánh string thuần, không localeCompare
+   để tránh lỗi locale. Format YYYYMMDD_HHMMSS / ISO đều sort đúng theo alphabet. */
+function roundSortKey(r) {
+  return r.round_id || r.started_at || '';
+}
+
+function finishLoadingRounds(rounds) {
+  // Sort ascending: index 0 = cũ nhất (bên trái frame), index n-1 = mới nhất (bên phải)
+  rounds.sort((a, b) => {
+    const ka = roundSortKey(a);
+    const kb = roundSortKey(b);
+    if (ka < kb) return -1;
+    if (ka > kb) return  1;
+    return 0;
+  });
+
+  allRounds = rounds;
+
+  if (rounds.length > 0) {
+    const first = roundSortKey(rounds[0]);
+    const last  = roundSortKey(rounds[rounds.length - 1]);
+    document.getElementById('rounds-status').textContent =
+      `✅ ${rounds.length} rounds · từ ${first} → ${last}`;
+  } else {
+    document.getElementById('rounds-status').textContent =
+      '⚠️ 0 file .json hợp lệ — chọn đúng thư mục chứa trực tiếp các file round *.json';
+  }
+  checkReady();
+}
+
+/** Safari / Firefox: chọn thư mục qua input webkitdirectory (không có showDirectoryPicker). */
+function isJsonRoundFile(name) {
+  const n = (name || '').toLowerCase();
+  return n.endsWith('.json');
+}
+
+async function loadRoundsFromFileList(files) {
+  document.getElementById('rounds-status').textContent = 'Đang đọc files...';
+
+  // Sort file theo tên (YYYYMMDD_HHMMSS.json) — cũ nhất trước
+  const sorted = Array.from(files)
+    .filter(f => isJsonRoundFile(f.name))
+    .sort((a, b) => {
+      if (a.name < b.name) return -1;
+      if (a.name > b.name) return  1;
+      return 0;
+    });
+
+  const rounds = [];
+  for (const file of sorted) {
+    try {
+      rounds.push(JSON.parse(await file.text()));
+    } catch { /* skip bad files */ }
+  }
+  finishLoadingRounds(rounds);
+}
+
+async function pickRoundsDir() {
+  if (window.showDirectoryPicker) {
+    try {
+      const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+      document.getElementById('dir-info').textContent = `📂 ${dirHandle.name}`;
+      document.getElementById('rounds-status').textContent = 'Đang đọc danh sách files...';
+
+      // Bước 1: thu thập tất cả [name, handle] của file .json
+      const entries = [];
+      for await (const [name, handle] of dirHandle.entries()) {
+        if (handle.kind === 'file' && isJsonRoundFile(name)) {
+          entries.push({ name, handle });
+        }
+      }
+
+      // Bước 2: sort theo tên file (YYYYMMDD_HHMMSS.json) — cũ nhất trước
+      entries.sort((a, b) => {
+        if (a.name < b.name) return -1;
+        if (a.name > b.name) return  1;
+        return 0;
+      });
+
+      document.getElementById('rounds-status').textContent =
+        `Đang đọc ${entries.length} files theo thứ tự...`;
+
+      // Bước 3: đọc lần lượt theo thứ tự đã sort
+      const rounds = [];
+      for (const { handle } of entries) {
+        try {
+          const file = await handle.getFile();
+          rounds.push(JSON.parse(await file.text()));
+        } catch { /* skip bad files */ }
+      }
+
+      finishLoadingRounds(rounds);
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        document.getElementById('dir-info').textContent = 'Lỗi: ' + e.message;
+      }
+    }
+    return;
+  }
+
+  document.getElementById('rounds-dir-input').click();
+}
+
+function loadConfigsFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) { alert('File JSON không hợp lệ'); return; }
+      configs = data.filter(c => c.id && c.pattern);
+      document.getElementById('cfg-info').textContent = `✅ ${configs.length} configs từ file`;
+      checkReady();
+    } catch (err) { alert('Lỗi đọc file: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function loadConfigsFromLS() {
+  try {
+    const data = JSON.parse(localStorage.getItem(CFG_LS_KEY)) || [];
+    configs = data.filter(c => c.id && c.pattern);
+    document.getElementById('cfg-info').textContent = `✅ ${configs.length} configs từ localStorage`;
+    checkReady();
+  } catch { alert('Không đọc được config từ localStorage'); }
+}
+
+function checkReady() {
+  const ready = allRounds.length > 0 && configs.length > 0;
+  document.getElementById('btn-analyze').disabled = !ready;
+  if (ready) {
+    setStatus(`Sẵn sàng — ${allRounds.length} rounds · ${configs.length} configs`);
+  }
+}
+
+function setStatus(msg) {
+  document.getElementById('status-bar').textContent = msg;
+}
+
+/* ──────────────────────────────────────
+   EVENT LISTENERS
+────────────────────────────────────── */
+document.getElementById('btn-pick-dir').addEventListener('click', pickRoundsDir);
+
+document.getElementById('rounds-dir-input').addEventListener('change', async (e) => {
+  const inp = e.target;
+  const fileArr = Array.from(inp.files || []);
+  inp.value = '';
+  if (!fileArr.length) return;
+  const first = fileArr[0];
+  const rel = first.webkitRelativePath || '';
+  const folderLabel = rel.includes('/')
+    ? rel.slice(0, rel.indexOf('/'))
+    : 'Thư mục đã chọn';
+  document.getElementById('dir-info').textContent = `📂 ${folderLabel}`;
+  await loadRoundsFromFileList(fileArr);
+});
+
+document.getElementById('btn-pick-cfg').addEventListener('click', () => {
+  document.getElementById('cfg-file-input').click();
+});
+document.getElementById('cfg-file-input').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) { loadConfigsFromFile(f); e.target.value = ''; }
+});
+
+document.getElementById('btn-load-ls').addEventListener('click', loadConfigsFromLS);
+
+document.getElementById('btn-analyze').addEventListener('click', runAnalysis);
+
+document.getElementById('btn-apply-all').addEventListener('click', applyAll);
+document.getElementById('btn-export').addEventListener('click', exportConfigs);
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    renderResults();
+  });
+});
+
+// Occ filter — preset buttons
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.occ-btn');
+  if (!btn) return;
+  document.querySelectorAll('.occ-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  minOcc = parseInt(btn.dataset.occ) || 0;
+  // Sync input
+  const inp = document.getElementById('inp-min-occ');
+  if (inp) inp.value = minOcc;
+  renderResults();
+});
+
+// Occ filter — custom input
+document.getElementById('inp-min-occ')?.addEventListener('input', e => {
+  const val = parseInt(e.target.value) || 0;
+  minOcc = Math.max(0, val);
+  // Sync preset buttons — deactivate all presets, mark active nếu khớp
+  document.querySelectorAll('.occ-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.occ) === minOcc);
+  });
+  renderResults();
+});
+</script>
+</body>
+</html>

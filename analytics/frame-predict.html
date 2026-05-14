@@ -112,9 +112,11 @@ button { cursor: pointer; border: none; border-radius: 7px; font-size: 12px; fon
 .c-chan   { background: #1d4ed8; color: #fff; border: 1px solid #3b82f6; }
 .c-le     { background: #b91c1c; color: #fff; border: 1px solid #ef4444; }
 
-/* matched highlight */
+/* matched highlight — pattern columns */
 .c-chan-m { background: #1e3fa8; color: #fff; border: 2px solid #60a5fa; box-shadow: 0 0 0 1px rgba(96,165,250,.25); }
 .c-le-m   { background: #991b1b; color: #fff; border: 2px solid #f87171; box-shadow: 0 0 0 1px rgba(248,113,113,.25); }
+/* pre-context highlight — tiền cảnh (tím nhạt) */
+.c-ctx-m  { background: #2d1b69; color: #c4b5fd; border: 1px dashed #7c3aed; }
 
 /* prediction cells */
 .c-pred-bet {
@@ -350,6 +352,12 @@ button { cursor: pointer; border: none; border-radius: 7px; font-size: 12px; fon
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2d3f55; border-radius: 3px; }
+
+/* cfg tabs */
+.cfg-tab { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500;
+           background: #0f172a; color: #64748b; border: 1px solid #2d3f55; cursor: pointer; }
+.cfg-tab:hover { background: #1e293b; color: #94a3b8; }
+.cfg-tab.active { background: #1e3a5f; color: #60a5fa; border-color: #2563eb; }
 </style>
 </head>
 <body>
@@ -422,6 +430,8 @@ button { cursor: pointer; border: none; border-radius: 7px; font-size: 12px; fon
       <input type="file" id="file-import" accept=".json" style="display:none">
     </div>
   </div>
+  <!-- Tabs lọc -->
+  <div id="cfg-tabs" style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;"></div>
   <div id="cfg-list"></div>
 </div>
 
@@ -524,6 +534,7 @@ let totalRounds = 0;
 let editingId   = null;
 let patCols     = [];
 let pollTimer   = null;
+let cfgFilter   = 'all';  // 'all' | 'bet' | 'predict' | 'off'
 
 // Tracking realtime
 let lastSeenId  = null;   // round_id cuối đã xử lý — để phát hiện round mới
@@ -877,6 +888,67 @@ function renderStats() {
 
 }
 
+/** Render danh sách tiền cảnh đã pin cho 1 config trong list. */
+function pinHtml(cfg, activeCtxKey) {
+  const pins = cfg.preContexts;
+  if (!pins || !pins.length) return '';
+
+  const rows = pins.map(p => {
+    const isActive = p.key === activeCtxKey;
+
+    // Mini cột cho tiền cảnh
+    const ctxCols = p.cols.map(c => {
+      const bg  = c.type === 'chan' ? '#1d4ed8' : '#b91c1c';
+      const lbl = c.type === 'chan' ? 'C' : 'L';
+      const cells = Array.from({ length: Math.min(c.rows, MAX_ROWS) }, () =>
+        `<div style="width:14px;height:14px;border-radius:3px;background:${bg};
+                     display:flex;align-items:center;justify-content:center;
+                     font-size:7px;font-weight:700;color:#fff;margin-bottom:1px;">${lbl}</div>`
+      ).join('');
+      return `<div style="display:flex;flex-direction:column;">${cells}</div>`;
+    }).join('');
+
+    // Mini cột cho pattern
+    const patCols = cfg.pattern.map(p2 => {
+      const bg  = p2.type === 'chan' ? '#1e3fa8' : '#991b1b';
+      const bdr = p2.type === 'chan' ? '1px solid #60a5fa' : '1px solid #f87171';
+      const lbl = p2.type === 'chan' ? 'C' : 'L';
+      const cells = Array.from({ length: Math.min(p2.rows, MAX_ROWS) }, () =>
+        `<div style="width:14px;height:14px;border-radius:3px;background:${bg};border:${bdr};
+                     display:flex;align-items:center;justify-content:center;
+                     font-size:7px;font-weight:700;color:#fff;margin-bottom:1px;">${lbl}</div>`
+      ).join('');
+      return `<div style="display:flex;flex-direction:column;">${cells}</div>`;
+    }).join('');
+
+    // Prediction cell
+    const predBg  = p.predictType === 'chan' ? '#1d4ed8' : '#b91c1c';
+    const predBdr = p.shouldBet ? '2px solid #22c55e' : '2px dashed #d97706';
+    const predCell = `<div style="width:16px;height:16px;border-radius:4px;background:${predBg};
+                                  border:${predBdr};display:flex;align-items:center;
+                                  justify-content:center;font-size:7px;font-weight:700;
+                                  color:#fff;align-self:flex-start;">${p.predictType==='chan'?'C':'L'}</div>`;
+
+    const hitPct = p.hitRate != null ? Math.round(p.hitRate * 100) + '%' : '';
+    const activeBg = isActive ? 'background:#071a14;border-color:#22c55e;' : 'background:#0a1120;border-color:#1e2e42;';
+
+    return `<div style="display:flex;align-items:center;gap:5px;padding:3px 7px;
+                        border:1px solid;border-radius:6px;${activeBg}">
+      <span style="font-size:10px;opacity:.6">📌</span>
+      <div style="display:flex;gap:2px;align-items:flex-start;">${ctxCols}</div>
+      <span style="color:#334155;font-size:10px;">+</span>
+      <div style="display:flex;gap:2px;align-items:flex-start;">${patCols}</div>
+      <span style="color:#334155;font-size:10px;padding:0 1px;">→</span>
+      ${predCell}
+      ${hitPct ? `<span style="font-size:9px;color:${isActive?'#4ade80':'#475569'};font-weight:${isActive?700:400};">${hitPct}</span>` : ''}
+      ${isActive ? '<span style="font-size:9px;color:#4ade80;font-weight:700;">● ACTIVE</span>' : ''}
+    </div>`;
+  }).join('');
+
+  return `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;padding-top:6px;
+                       border-top:1px solid #1e2e42;">${rows}</div>`;
+}
+
 /** Một dòng HTML: tỉ lệ đoán / BET riêng cho cấu hình (theo lần khớp lúc khóa dự đoán). */
 function cfgStatHtml(cfgId) {
   if (!stats.cfg) stats.cfg = {};
@@ -930,18 +1002,52 @@ function buildFrame(rounds) {
 }
 
 /* ──────────────────────────────────────
-   CONFIG MATCHING
-   Pattern = [{type, rows}]
-   Matches when the TAIL of frame equals the pattern exactly.
+   CONFIG MATCHING — 2 tầng
+   Tầng 1: pattern match đơn thuần
+   Tầng 2: preContext + pattern (extended trigger, độ tin cậy cao hơn)
+   Trả về array config objects, mỗi object có thêm:
+     _ctx: pre-context đang khớp (hoặc null nếu chỉ base match)
+     predictType / shouldBet: đã override từ _ctx nếu có
 ────────────────────────────────────── */
 function findMatches(fr, cfgs) {
-  return cfgs.filter(cfg => {
-    if (!cfg.enabled || !cfg.pattern || !cfg.pattern.length) return false;
-    const p = cfg.pattern;
-    if (fr.length < p.length) return false;
-    const tail = fr.slice(-p.length);
-    return p.every((pp, i) => tail[i].type === pp.type && tail[i].count === pp.rows);
-  });
+  const results = [];
+  for (const cfg of cfgs) {
+    if (!cfg.enabled || !cfg.pattern || !cfg.pattern.length) continue;
+    const P = cfg.pattern.length;
+    if (fr.length < P) continue;
+
+    // Tầng 1 — base pattern
+    const tail = fr.slice(-P);
+    const baseMatch = cfg.pattern.every((pp, i) =>
+      tail[i].type === pp.type && tail[i].count === pp.rows
+    );
+    if (!baseMatch) continue;
+
+    // Tầng 2 — tìm pre-context khớp (nếu có)
+    let matchedCtx = null;
+    if (cfg.preContexts && cfg.preContexts.length) {
+      for (const ctx of cfg.preContexts) {
+        const ctxLen = ctx.cols.length;
+        if (fr.length < P + ctxLen) continue;
+        const ctxSlice = fr.slice(-(P + ctxLen), -P || undefined);
+        const ctxMatch = ctx.cols.every((cc, i) =>
+          ctxSlice[i] && ctxSlice[i].type === cc.type && ctxSlice[i].count === cc.rows
+        );
+        if (ctxMatch) { matchedCtx = ctx; break; }
+      }
+    }
+
+    // Build result — override predictType/shouldBet khi có extended match
+    results.push({
+      ...cfg,
+      predictType: matchedCtx?.predictType ?? cfg.predictType,
+      shouldBet:   matchedCtx != null ? matchedCtx.shouldBet : cfg.shouldBet,
+      _ctx:        matchedCtx,           // null = base only, object = extended
+      _ctxLen:     matchedCtx ? matchedCtx.cols.length : 0,
+      _hitRate:    matchedCtx?.hitRate ?? null,
+    });
+  }
+  return results;
 }
 
 /* ──────────────────────────────────────
@@ -1151,11 +1257,17 @@ function renderGrid() {
   const frameWithPred = frame.length + extraCol;
   const startFrame = Math.max(0, frameWithPred - totalSlots);
 
-  // Matched range in frame
+  // Pattern matched range
   let matchStart = -1;
   if (matched.length) {
     const maxLen = Math.max(...matched.map(m => m.pattern.length));
     matchStart = frame.length - maxLen;
+  }
+  // Pre-context range (tiền cảnh, bắt đầu trước matchStart)
+  let ctxStart = -1;
+  if (matched.length) {
+    const maxCtxLen = Math.max(...matched.map(m => m._ctxLen || 0));
+    if (maxCtxLen > 0) ctxStart = matchStart - maxCtxLen;
   }
 
   const allowCellPulse = Boolean(matched.length && pp != null && matchStart >= 0);
@@ -1165,6 +1277,7 @@ function renderGrid() {
     const fi = slot + startFrame; // index into frame (or pred col)
     const colData = fi < frame.length ? frame[fi] : null;
     const isMatchedCol = fi >= matchStart && fi < frame.length && matchStart >= 0;
+    const isCtxCol     = ctxStart >= 0 && fi >= ctxStart && fi < matchStart;
 
     const colDiv = document.createElement('div');
     colDiv.className = 'frame-col';
@@ -1187,6 +1300,8 @@ function renderGrid() {
       } else if (colData && row < colData.count) {
         if (isMatchedCol) {
           cell.classList.add(colData.type === 'chan' ? 'c-chan-m' : 'c-le-m');
+        } else if (isCtxCol) {
+          cell.classList.add('c-ctx-m');
         } else {
           cell.classList.add(colData.type === 'chan' ? 'c-chan' : 'c-le');
         }
@@ -1239,15 +1354,37 @@ function renderPred() {
 
   for (const cfg of matched) {
     const card = document.createElement('div');
+    const isExtended = cfg._ctx != null;
     card.className = `pred-card ${cfg.shouldBet ? 'pred-bet' : 'pred-nobet'}`;
 
-    const badge = cfg.shouldBet
-      ? '<span class="pred-badge badge-bet">🎯 CÁ CƯỢC</span>'
-      : '<span class="pred-badge badge-nobet">👁 CHỈ DỰ ĐOÁN</span>';
+    // Badge: phân biệt extended vs base
+    const badge = isExtended
+      ? `<span class="pred-badge badge-bet" style="background:#2e1b69;color:#a78bfa">📌 EXTENDED · ${cfg.shouldBet ? 'CÁ CƯỢC' : 'DỰ ĐOÁN'}</span>`
+      : (cfg.shouldBet
+          ? '<span class="pred-badge badge-bet">🎯 CÁ CƯỢC</span>'
+          : '<span class="pred-badge badge-nobet">👁 CHỈ DỰ ĐOÁN</span>');
+
+    // Extended trigger detail
+    const ctxDetail = isExtended ? `
+      <div style="margin-top:6px;padding:6px 8px;background:#1a0f2e;border:1px solid #4c1d95;
+                  border-radius:6px;font-size:10px;color:#c4b5fd;">
+        <div style="font-weight:600;margin-bottom:3px;color:#a78bfa;">📌 Extended trigger khớp</div>
+        <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap;">
+          ${cfg._ctx.cols.map(c=>`<span style="padding:1px 4px;border-radius:3px;font-size:9px;font-weight:700;
+            color:#fff;background:${c.type==='chan'?'#1d4ed8':'#b91c1c'}">${c.rows}${c.type==='chan'?'C':'L'}</span>`).join('')}
+          <span style="color:#4c1d95;margin:0 2px">+</span>
+          ${cfg.pattern.map(p=>`<span style="padding:1px 4px;border-radius:3px;font-size:9px;font-weight:700;
+            color:#fff;background:${p.type==='chan'?'#1e3fa8':'#991b1b'}">${p.rows}${p.type==='chan'?'C':'L'}</span>`).join('')}
+        </div>
+        ${cfg._hitRate != null ? `<div style="margin-top:3px;color:#4ade80;font-weight:600;">
+          Hit rate: ${Math.round(cfg._hitRate*100)}% · ${cfg._ctx.count} lần lịch sử
+        </div>` : ''}
+      </div>` : '';
 
     card.innerHTML = `
       ${badge}
       <div class="pred-visual-wrap">${miniPredHtmlForCfg(cfg, 'md')}</div>
+      ${ctxDetail}
       ${cfg.note ? `<div class="pred-note">${esc(cfg.note)}</div>` : ''}
     `;
     panel.appendChild(card);
@@ -1261,12 +1398,43 @@ function renderCfgList() {
   const list = document.getElementById('cfg-list');
   list.innerHTML = '';
 
-  if (!configs.length) {
-    list.innerHTML = '<div class="empty">Chưa có cấu hình. Nhấn "＋ Thêm" để tạo cấu hình khung đầu tiên.</div>';
+  // ── Tabs ──
+  const counts = {
+    all:     configs.length,
+    bet:     configs.filter(c => c.enabled && c.shouldBet).length,
+    predict: configs.filter(c => c.enabled && !c.shouldBet).length,
+    off:     configs.filter(c => !c.enabled).length,
+  };
+  const tabDefs = [
+    { id: 'all',     label: 'Tất cả' },
+    { id: 'bet',     label: '🎯 Nên BET' },
+    { id: 'predict', label: '👁 Chỉ dự đoán' },
+    { id: 'off',     label: 'Không kích hoạt' },
+  ];
+  const tabsEl = document.getElementById('cfg-tabs');
+  tabsEl.innerHTML = tabDefs.map(t =>
+    `<button class="cfg-tab${cfgFilter === t.id ? ' active' : ''}" data-tab="${t.id}">
+      ${t.label} <span style="opacity:.6">(${counts[t.id]})</span>
+    </button>`
+  ).join('');
+  tabsEl.querySelectorAll('.cfg-tab').forEach(btn => {
+    btn.addEventListener('click', () => { cfgFilter = btn.dataset.tab; renderCfgList(); });
+  });
+
+  // ── Filter ──
+  const visible = configs.filter(cfg => {
+    if (cfgFilter === 'bet')     return cfg.enabled && cfg.shouldBet;
+    if (cfgFilter === 'predict') return cfg.enabled && !cfg.shouldBet;
+    if (cfgFilter === 'off')     return !cfg.enabled;
+    return true;
+  });
+
+  if (!visible.length) {
+    list.innerHTML = `<div class="empty">${configs.length ? 'Không có cấu hình nào trong tab này.' : 'Chưa có cấu hình. Nhấn "＋ Thêm" để tạo.'}</div>`;
     return;
   }
 
-  for (const cfg of configs) {
+  for (const cfg of visible) {
     const isMatch = matched.some(m => m.id === cfg.id);
     const item = document.createElement('div');
     item.className = `cfg-item${isMatch ? ' matched' : ''}`;
@@ -1281,21 +1449,55 @@ function renderCfgList() {
       cfg.enabled = e.target.checked; saveCfgs(); recompute();
     });
 
-    const visual = document.createElement('div');
-    visual.className = 'cfg-visual';
-    visual.innerHTML = miniPredHtmlForCfg(cfg, 'sm');
-
     const info = document.createElement('div');
     info.className = 'cfg-info';
     const betBadge = cfg.shouldBet
       ? `<span style="background:#14532d;color:#4ade80;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;">BET</span>`
       : `<span style="background:#7c2d04;color:#fcd34d;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;">NO BET</span>`;
     const matchBadge = isMatch ? ` <span style="font-size:11px;">✅</span>` : '';
-    const patDesc = cfg.pattern.map(p => `${p.rows}${p.type === 'chan' ? 'C' : 'L'}`).join('→');
+    const extBadge   = isMatch && matched.find(m => m.id === cfg.id)?._ctx
+      ? ` <span style="background:#2e1b69;color:#a78bfa;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;">📌 EXT</span>` : '';
+
+    // Visual: các cột ô (C/L) + mũi tên + ô dự đoán
+    const patColsHtml = cfg.pattern.map(p => {
+      const bg = p.type === 'chan' ? '#1d4ed8' : '#b91c1c';
+      const cells = Array.from({length: Math.min(p.rows, MAX_ROWS)}, () =>
+        `<div style="width:18px;height:18px;border-radius:4px;background:${bg};
+                     display:flex;align-items:center;justify-content:center;
+                     font-size:9px;font-weight:700;color:#fff;margin-bottom:2px;">
+           ${p.type === 'chan' ? 'C' : 'L'}
+         </div>`
+      ).join('');
+      return `<div style="display:flex;flex-direction:column;">${cells}</div>`;
+    }).join('');
+    const predBg  = cfg.predictType === 'chan' ? '#1d4ed8' : '#b91c1c';
+    const predBdr = cfg.shouldBet ? '2px solid #22c55e' : '2px dashed #d97706';
+    const predCell = `<div style="width:20px;height:20px;border-radius:5px;background:${predBg};
+                                  border:${predBdr};display:flex;align-items:center;
+                                  justify-content:center;font-size:9px;font-weight:700;
+                                  color:#fff;align-self:flex-start;">
+                       ${cfg.predictType === 'chan' ? 'C' : 'L'}</div>`;
+    const patVisual = `<div style="display:flex;gap:3px;align-items:flex-start;">
+                         ${patColsHtml}
+                         <span style="color:#334155;font-size:12px;padding:0 2px;align-self:flex-start;">→</span>
+                         ${predCell}
+                       </div>`;
+
+    // Pinned pre-contexts
+    const matchedEntry = matched.find(m => m.id === cfg.id);
+    const activeCtxKey = matchedEntry?._ctx?.key ?? null;
+    const preCtxHtml   = pinHtml(cfg, activeCtxKey);
+
     info.innerHTML = `
-      <div class="cfg-name">${esc(cfg.name)} ${betBadge}${matchBadge}</div>
-      <div class="cfg-meta">${patDesc} → ${cfg.predictType === 'chan' ? 'Chẵn' : 'Lẻ'}${cfg.note ? ' · ' + esc(cfg.note) : ''}</div>
-      ${cfgStatHtml(cfg.id)}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        ${patVisual}
+        <div>
+          <div class="cfg-name" style="margin-bottom:2px;">${esc(cfg.name)} ${betBadge}${matchBadge}${extBadge}</div>
+          ${cfg.note ? `<div class="cfg-meta">${esc(cfg.note)}</div>` : ''}
+          ${cfgStatHtml(cfg.id)}
+        </div>
+      </div>
+      ${preCtxHtml}
     `;
 
     // Actions
@@ -1327,7 +1529,6 @@ function renderCfgList() {
     acts.appendChild(delBtn);
 
     item.appendChild(sw);
-    item.appendChild(visual);
     item.appendChild(info);
     item.appendChild(acts);
     list.appendChild(item);
@@ -1546,13 +1747,26 @@ function importConfigs(file) {
       if (!Array.isArray(data)) { alert('File không hợp lệ (cần JSON array).'); return; }
       const valid = data.filter(c => c.id && c.name && Array.isArray(c.pattern) && c.predictType);
       if (!valid.length) { alert('Không tìm thấy cấu hình hợp lệ trong file.'); return; }
-      const existIds = new Set(configs.map(c => c.id));
-      let added = 0;
+
+      const existMap = new Map(configs.map(c => [c.id, c]));
+      let added = 0, updated = 0;
+
       for (const c of valid) {
-        if (!existIds.has(c.id)) { configs.push({ enabled: true, ...c }); added++; }
+        // enabled: lấy từ file nếu có, nếu không thì mặc định true
+        const enabledVal = typeof c.enabled === 'boolean' ? c.enabled : true;
+        if (existMap.has(c.id)) {
+          // Update config hiện có — giữ nguyên id, cập nhật tất cả field
+          const idx = configs.findIndex(x => x.id === c.id);
+          configs[idx] = { ...c, enabled: enabledVal };
+          updated++;
+        } else {
+          configs.push({ ...c, enabled: enabledVal });
+          added++;
+        }
       }
+
       saveCfgs(); recompute();
-      alert(`Import xong: thêm ${added} cấu hình mới.`);
+      alert(`Import xong:\n• ${added} cấu hình mới thêm\n• ${updated} cấu hình đã cập nhật (bao gồm trạng thái bật/tắt)`);
     } catch (err) {
       alert('Lỗi đọc file: ' + err.message);
     }

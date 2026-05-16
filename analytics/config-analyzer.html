@@ -150,21 +150,16 @@ label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em
 <!-- SETTINGS -->
 <div class="card">
   <div class="card-header"><h2>2. Cài đặt phân tích</h2></div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
     <div>
-      <label>Ngưỡng bet (%)</label>
-      <input type="number" id="inp-threshold" value="70" min="50" max="95" step="1" style="margin-top:6px">
-      <div style="font-size:10px;color:#475569;margin-top:3px">Hit rate ≥ ngưỡng → BET</div>
+      <label>Ngưỡng bet (Wilson score %)</label>
+      <input type="number" id="inp-threshold" value="70" min="50" max="95" step="1"
+        style="margin-top:6px;width:80px">
+      <div style="font-size:10px;color:#475569;margin-top:3px">Wilson ≥ ngưỡng → BET</div>
     </div>
-    <div>
-      <label>Số cột tiền cảnh tối đa</label>
-      <input type="number" id="inp-ctx-depth" value="2" min="1" max="14" step="1" style="margin-top:6px">
-      <div style="font-size:10px;color:#475569;margin-top:3px">Khuyến nghị: 1–2 cột (nhiều hơn → nhóm quá nhỏ)</div>
-    </div>
-    <div>
-      <label>Cỡ mẫu tối thiểu hiển thị</label>
-      <input type="number" id="inp-min-sample" value="2" min="1" max="20" step="1" style="margin-top:6px">
-      <div style="font-size:10px;color:#475569;margin-top:3px">Nhóm < N lần → ⚠️ ít mẫu (vẫn hiện, dùng cẩn thận)</div>
+    <div style="padding:8px 12px;background:#0f172a;border:1px solid #1e2e42;border-radius:8px;font-size:11px;color:#475569;">
+      <div><span style="color:#60a5fa;font-weight:600">Số cột tiền cảnh:</span> tự động per-config (tối đa 5, giới hạn 15 − pattern)</div>
+      <div style="margin-top:3px"><span style="color:#60a5fa;font-weight:600">Cỡ mẫu tối thiểu:</span> 3 lần (⚠️ dưới ngưỡng vẫn hiển thị, Wilson tự xử lý)</div>
     </div>
   </div>
   <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
@@ -173,6 +168,10 @@ label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em
   </div>
   <div id="prog-bar-wrap" style="display:none"><div id="prog-bar"></div></div>
 </div>
+
+<!-- hidden inputs giữ giá trị mặc định cho JS đọc -->
+<input type="hidden" id="inp-ctx-depth" value="5">
+<input type="hidden" id="inp-min-sample" value="3">
 
 <!-- FILTER + EXPORT -->
 <div id="result-controls" style="display:none">
@@ -294,27 +293,91 @@ function buildColumnHistory(rounds) {
 }
 
 /* ──────────────────────────────────────
-   ANALYSIS ENGINE
-   For a given config, find all pattern occurrences in column history,
-   record pre-context (up to ctxDepth cols before pattern) + next outcome.
+   HELPERS — WILSON SCORE
+   Cận dưới của khoảng tin cậy Wilson (95%).
+   Đại diện cho "hit rate thực sự an toàn nhất" với n mẫu.
+   Ưu điểm: tự động phạt khi n nhỏ.
+────────────────────────────────────── */
+function wilsonLower(hits, n, z = 1.96) {
+  if (n === 0) return 0;
+  const p = hits / n;
+  return (p + z*z/(2*n) - z * Math.sqrt((p*(1-p) + z*z/(4*n)) / n)) / (1 + z*z/n);
+}
+
+/* ──────────────────────────────────────
+   ADAPTIVE DEPTH — đếm nhóm thực tế
+   Thay vì ước tính groups ≈ α^d,
+   đếm thực sự số unique context keys
+   tại mỗi depth rồi chọn depth sâu nhất
+   sao cho avg group size ≥ TARGET (3).
+────────────────────────────────────── */
+function findOptimalDepth(matchPositions, cols, maxCtxDepth, P) {
+  const TARGET   = 3;
+  const maxAvail = Math.min(maxCtxDepth, 15 - P);
+  const occ      = matchPositions.length;
+
+  if (occ < TARGET || maxAvail <= 0) return 0;
+
+  // Thử từ deep nhất → cạn dần, trả về depth đầu tiên hợp lệ
+  for (let d = maxAvail; d >= 1; d--) {
+    const groups = new Set();
+    for (const i of matchPositions) {
+      const ctxStart = Math.max(0, (i - P) - d);
+      const key = cols.slice(ctxStart, i - P).map(c => c.count + c.type[0]).join('|');
+      groups.add(key);
+    }
+    const avgSize = occ / groups.size;
+    if (avgSize >= TARGET) return d;
+  }
+  return 1;
+}
+
+/* ──────────────────────────────────────
+   ANALYSIS ENGINE — nâng cấp
+   Mỗi tiền cảnh được tính thêm:
+   - Wilson score (phạt mẫu nhỏ)
+   - Xu hướng gần đây (500 rounds cuối)
+   - Độ ổn định (3 giai đoạn lịch sử)
+   - Combined score = basis for ranking
+   - Adaptive depth tự động per-config
 ────────────────────────────────────── */
 function analyzeConfig(cfg, cols, rounds, threshold, ctxDepth, minSample) {
-  const P = cfg.pattern.length;
+  const P     = cfg.pattern.length;
   const total = rounds.length;
-  const RECENT_N = Math.min(500, Math.floor(total * 0.1));
+
+  // ── Pass 1: collect tất cả vị trí pattern khớp ──
+  const matchPositions = [];
+  for (let i = P; i <= cols.length; i++) {
+    let m = true;
+    for (let j = 0; j < P; j++) {
+      if (cols[i-P+j].type !== cfg.pattern[j].type || cols[i-P+j].count !== cfg.pattern[j].rows) { m=false; break; }
+    }
+    if (m) matchPositions.push(i);
+  }
+  const occCount = matchPositions.length;
+
+  // ── Tính adaptive depth bằng đếm nhóm thực tế ──
+  const adaptiveDepth = findOptimalDepth(matchPositions, cols, ctxDepth, P);
+
+  // Gần đây = 500 rounds cuối hoặc 10% data
+  const RECENT_N    = Math.min(500, Math.floor(total * 0.1));
   const recentStart = total - RECENT_N;
+
+  // 3 giai đoạn đều nhau để đo độ ổn định
+  const w1End = Math.floor(total / 3);
+  const w2End = Math.floor(total * 2 / 3);
 
   const result = {
     occurrences: 0,
     outcomes:    { chan: 0, le: 0 },
     recent:      { chan: 0, le: 0 },
-    old:         { chan: 0, le: 0 },
-    contexts:    {},   // ctxKey → {cols, count, chan, le}
+    contexts:    {},
+    adaptiveDepth,   // depth thực tế đã dùng
+    maxAvailable: Math.min(ctxDepth, 15 - P),  // max có thể trong frame
     recommendation: null,
   };
 
   for (let i = P; i <= cols.length; i++) {
-    // Match pattern against cols[i-P .. i-1]
     let match = true;
     for (let j = 0; j < P; j++) {
       const c = cols[i - P + j];
@@ -323,9 +386,8 @@ function analyzeConfig(cfg, cols, rounds, threshold, ctxDepth, minSample) {
     }
     if (!match) continue;
 
-    // Next round after last pattern column
-    const lastCol   = cols[i - 1];
-    const nextIdx   = lastCol.end + 1;
+    const lastCol = cols[i - 1];
+    const nextIdx = lastCol.end + 1;
     if (nextIdx >= rounds.length) continue;
 
     const outcome = getRoundType(rounds[nextIdx]);
@@ -333,60 +395,123 @@ function analyzeConfig(cfg, cols, rounds, threshold, ctxDepth, minSample) {
 
     result.occurrences++;
     result.outcomes[outcome]++;
-
-    // Recency
     if (nextIdx >= recentStart) result.recent[outcome]++;
-    else result.old[outcome]++;
 
-    // Pre-context: up to ctxDepth columns before pattern start
-    const ctxEnd   = i - P;            // exclusive
-    const ctxStart = Math.max(0, ctxEnd - ctxDepth);
-    const ctxCols  = cols.slice(ctxStart, ctxEnd);
-    const ctxKey   = ctxCols.map(c => `${c.count}${c.type[0]}`).join('|');
+    // Pre-context — dùng adaptiveDepth (tự động per-config)
+    const ctxEnd  = i - P;
+    const ctxStart = Math.max(0, ctxEnd - adaptiveDepth);
+    const ctxCols = cols.slice(ctxStart, ctxEnd);
+    const ctxKey  = ctxCols.map(c => `${c.count}${c.type[0]}`).join('|');
 
     if (!result.contexts[ctxKey]) {
       result.contexts[ctxKey] = {
         colDefs: ctxCols.map(c => ({ type: c.type, rows: c.count })),
         count: 0, chan: 0, le: 0,
+        recent:  { chan: 0, le: 0 },
+        windows: [{ chan: 0, le: 0 }, { chan: 0, le: 0 }, { chan: 0, le: 0 }],
       };
     }
-    result.contexts[ctxKey].count++;
-    result.contexts[ctxKey][outcome]++;
+    const g = result.contexts[ctxKey];
+    g.count++;
+    g[outcome]++;
+    if (nextIdx >= recentStart) g.recent[outcome]++;
+    const wIdx = nextIdx < w1End ? 0 : nextIdx < w2End ? 1 : 2;
+    g.windows[wIdx][outcome]++;
   }
 
-  if (result.occurrences === 0) {
-    result.recommendation = null;
-    return result;
-  }
+  if (result.occurrences === 0) { result.recommendation = null; return result; }
 
-  // Overall best prediction
   const chanRate = result.outcomes.chan / result.occurrences;
   const bestType = chanRate >= 0.5 ? 'chan' : 'le';
   const bestRate = Math.max(chanRate, 1 - chanRate);
 
-  // Tất cả tiền cảnh, sort theo count giảm dần rồi hitRate
-  // minSample chỉ dùng để đánh dấu "ít mẫu", không lọc bỏ
-  const topCtx = Object.values(result.contexts)
-    .map(g => ({
-      ...g,
-      hitRate:      g[bestType] / g.count,
-      bestType,
-      lowSample:    g.count < minSample,  // ⚠️ ít mẫu
-    }))
-    .sort((a, b) => b.count - a.count || b.hitRate - a.hitRate)
-    .slice(0, 10);
+  // ── Score mỗi context group ──
+  const scoredCtx = Object.values(result.contexts).map(g => {
+    const ctxBestType = g.chan >= g.le ? 'chan' : 'le';
+    const hits = g[ctxBestType];
+    const n    = g.count;
+    const hitRate = hits / n;
 
-  // Best context-specific recommendation
-  const bestCtx = topCtx.length > 0 ? topCtx[0] : null;
-  const ctxHitRate = bestCtx ? bestCtx.hitRate : bestRate;
+    // Wilson lower bound
+    const wilson = wilsonLower(hits, n);
+
+    // Xu hướng gần đây
+    const rTotal = g.recent.chan + g.recent.le;
+    const rRate  = rTotal > 0 ? g.recent[ctxBestType] / rTotal : null;
+    const trend  = rRate === null ? 'neutral'
+                 : rRate > hitRate + 0.07 ? 'up'
+                 : rRate < hitRate - 0.07 ? 'down' : 'stable';
+
+    // Độ ổn định qua 3 giai đoạn
+    const winRates = g.windows
+      .map(w => { const wt = w.chan + w.le; return wt > 0 ? w[ctxBestType] / wt : null; })
+      .filter(r => r !== null);
+    let stability = 'unknown';
+    if (winRates.length >= 2) {
+      const mean = winRates.reduce((a, b) => a + b, 0) / winRates.length;
+      const std  = Math.sqrt(winRates.reduce((s, r) => s + (r-mean)**2, 0) / winRates.length);
+      stability = std < 0.10 ? 'high' : std < 0.20 ? 'medium' : 'low';
+    }
+
+    // Combined score (0–1):
+    //   50% Wilson (đã tích hợp cả n và hitRate)
+    //   30% stability bonus
+    //   20% trend bonus
+    const stabW  = stability === 'high' ? 1.0 : stability === 'medium' ? 0.6 : stability === 'unknown' ? 0.5 : 0.2;
+    const trendW = trend === 'up' ? 1.0 : trend === 'stable' ? 0.7 : trend === 'neutral' ? 0.5 : 0.2;
+    const combinedScore = wilson * 0.5 + stabW * hitRate * 0.3 + trendW * hitRate * 0.2;
+
+    // shouldBet dựa trên Wilson score (không phải raw hitRate)
+    const shouldBetCtx = wilson >= threshold / 100;
+
+    // Lý do tự động
+    const reasons = [];
+    if (hitRate >= 0.75)          reasons.push(`hit rate cao (${Math.round(hitRate*100)}%)`);
+    else if (hitRate >= 0.65)     reasons.push(`hit rate khá (${Math.round(hitRate*100)}%)`);
+    if (trend === 'up')           reasons.push(`xu hướng tăng gần đây (${Math.round(rRate*100)}%)`);
+    if (stability === 'high')     reasons.push('ổn định qua các giai đoạn');
+    if (stability === 'low')      reasons.push('⚠️ không ổn định');
+    if (trend === 'down')         reasons.push('⚠️ xu hướng giảm gần đây');
+    if (n >= 10)                  reasons.push(`mẫu lớn (${n} lần)`);
+    else if (n < minSample)       reasons.push(`⚠️ ít mẫu (${n} lần)`);
+
+    return {
+      ...g,
+      ctxBestType, hitRate, wilson,
+      rRate, trend, stability,
+      combinedScore, shouldBetCtx,
+      lowSample: n < minSample,
+      reasons,
+    };
+  });
+
+  // Sort by combined score (cao nhất = tốt nhất)
+  scoredCtx.sort((a, b) => b.combinedScore - a.combinedScore);
+
+  // Conflict: 2 context hàng đầu dự đoán khác nhau, chênh < 10%
+  const top2 = scoredCtx.slice(0, 2);
+  const hasConflict = top2.length === 2
+    && top2[0].ctxBestType !== top2[1].ctxBestType
+    && Math.abs(top2[0].hitRate - top2[1].hitRate) < 0.10;
+
+  // Overall Wilson cho shouldBet tổng
+  const overallWilson = wilsonLower(Math.round(bestRate * result.occurrences), result.occurrences);
 
   result.recommendation = {
-    predictType: bestType,
-    overallRate: bestRate,
-    shouldBet:   bestRate >= threshold / 100,
-    topContexts: topCtx,
-    bestCtxRate: ctxHitRate,
-    changed: bestType !== cfg.predictType || (bestRate >= threshold / 100) !== cfg.shouldBet,
+    predictType:  bestType,
+    overallRate:  bestRate,
+    overallWilson,
+    shouldBet:    overallWilson >= threshold / 100,
+    topContexts:  scoredCtx.slice(0, 10),
+    bestCtxRate:  scoredCtx.length > 0 ? scoredCtx[0].hitRate : bestRate,
+    changed:       bestType !== cfg.predictType || (overallWilson >= threshold / 100) !== cfg.shouldBet,
+    hasConflict,
+    adaptiveDepth,
+    maxAvailable:  result.maxAvailable,
+    // Top gợi ý: combined score cao + hitRate >= 0.60 + không conflict
+    topReco: scoredCtx
+      .filter(g => g.hitRate >= 0.60 && g.combinedScore > 0.2)
+      .slice(0, 3),
   };
 
   return result;
@@ -575,46 +700,111 @@ function buildCfgCard(cfg, res, threshold) {
 
       <!-- Top contexts -->
       ${rec?.topContexts?.length ? `
-      <div class="ctx-title">Tiền cảnh tốt nhất (trước pattern)
-        <span style="font-weight:400;color:#334155;margin-left:6px">📌 Pin để dùng làm extended trigger trong frame-predict</span>
+      <!-- ⭐ AUTO-RECOMMEND -->
+      ${rec.topReco?.length ? `
+      <div style="margin-bottom:12px;padding:10px 12px;background:#0c1a0e;
+                  border:1px solid #166534;border-radius:9px;">
+        <div style="font-size:11px;font-weight:700;color:#4ade80;margin-bottom:8px;">
+          ⭐ Gợi ý pin tốt nhất (dựa trên Wilson + Stability + Trend)
+        </div>
+        ${rec.topReco.map((g, ri) => {
+          const ctxKey = g.colDefs.map(c => c.rows + c.type[0]).join('|');
+          const isPinned = (cfg.preContexts||[]).some(p => p.key === ctxKey);
+          const trendIcon = g.trend==='up' ? '↑' : g.trend==='down' ? '↓' : '~';
+          const trendColor = g.trend==='up' ? '#4ade80' : g.trend==='down' ? '#f87171' : '#94a3b8';
+          const stabIcon = g.stability==='high' ? '🟢' : g.stability==='medium' ? '🟡' : g.stability==='unknown' ? '⬜' : '🔴';
+          return `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;
+                      padding:6px 8px;background:#0a1a0c;border-radius:6px;">
+            <span style="font-size:12px;font-weight:700;color:#475569;min-width:16px">#${ri+1}</span>
+            <div style="display:flex;align-items:center;gap:3px;">
+              ${ctxViz(g.colDefs)}
+              <span style="color:#334155;font-size:10px;margin:0 2px">+</span>
+              ${patternMini(cfg.pattern)}
+            </div>
+            <div style="flex:1;font-size:10px;color:#94a3b8;">
+              <span style="color:${rateColor(g.hitRate)};font-weight:700">${Math.round(g.hitRate*100)}%</span>
+              · Wilson <span style="color:#a78bfa;font-weight:600">${Math.round(g.wilson*100)}%</span>
+              · <span style="color:${trendColor}">${trendIcon} gần đây ${g.rRate!=null?Math.round(g.rRate*100)+'%':'—'}</span>
+              · ${stabIcon} ${g.stability}
+              · ${g.count} lần
+            </div>
+            <div style="font-size:10px;color:#64748b;font-style:italic;max-width:180px">
+              ${g.reasons.join(', ')}
+            </div>
+            ${isPinned
+              ? `<button class="btn-sm" style="background:#14532d;color:#4ade80;font-size:10px;white-space:nowrap"
+                   onclick="unpinPreContext('${cfg.id}','${ctxKey}')">📌 Đã pin</button>`
+              : `<button class="btn-sm btn-primary" style="font-size:10px;white-space:nowrap"
+                   onclick="pinPreContext('${cfg.id}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${g.ctxBestType}',${g.shouldBetCtx},${g.hitRate.toFixed(4)},${g.count})">📌 Pin</button>`
+            }
+          </div>`;
+        }).join('')}
+        ${rec.hasConflict ? `
+        <div style="font-size:10px;color:#fbbf24;margin-top:4px;">
+          ⚠️ Xung đột: 2 tiền cảnh hàng đầu dự đoán khác nhau với chênh lệch &lt;10% — không nên bet khi cả 2 cùng khớp
+        </div>` : ''}
+      </div>` : ''}
+
+      <div class="ctx-title">Tất cả tiền cảnh (xếp theo Combined Score)
+        <span style="font-weight:400;color:#334155;margin-left:6px">📌 Pin để dùng làm extended trigger</span>
+        <span style="margin-left:8px;padding:1px 7px;border-radius:4px;font-size:10px;font-weight:600;
+                     background:#1e3a5f;color:#60a5fa;">
+          Depth tự động: ${rec.adaptiveDepth} cột
+          <span style="color:#334155"> / ${rec.maxAvailable} có thể trong frame</span>
+        </span>
       </div>
       <table class="ctx-table">
         <thead><tr>
-          <th>Tiền cảnh → pattern</th><th>Lần</th>
-          <th>Chẵn</th><th>Lẻ</th>
-          <th>Hit rate</th><th>Bet?</th><th></th>
+          <th>Tiền cảnh → pattern</th>
+          <th>Lần</th>
+          <th>Hit rate</th>
+          <th title="Wilson lower bound — hit rate thực sự an toàn với cỡ mẫu này">Wilson↓</th>
+          <th title="Xu hướng 500 rounds gần nhất">Trend</th>
+          <th title="Độ ổn định qua 3 giai đoạn">Stab</th>
+          <th title="Combined score tổng hợp">Score</th>
+          <th>Bet?</th>
+          <th></th>
         </tr></thead>
         <tbody>
           ${rec.topContexts.map((g, gi) => {
-            const ctxBestType  = g.chan >= g.le ? 'chan' : 'le';
-            const hr           = g[ctxBestType] / g.count;
-            const shouldBetCtx = hr >= threshold / 100;
-            const ctxKey       = g.colDefs.map(c => c.rows + c.type[0]).join('|');
-            const isPinned     = (cfg.preContexts||[]).some(p => p.key === ctxKey);
-            const isLow        = g.lowSample;
+            const ctxKey   = g.colDefs.map(c => c.rows + c.type[0]).join('|');
+            const isPinned = (cfg.preContexts||[]).some(p => p.key === ctxKey);
+            const isLow    = g.lowSample;
+            const trendIcon  = g.trend==='up' ? '<span style="color:#4ade80">↑</span>'
+                             : g.trend==='down' ? '<span style="color:#f87171">↓</span>'
+                             : g.trend==='neutral' ? '<span style="color:#475569">—</span>'
+                             : '<span style="color:#94a3b8">~</span>';
+            const rRateTxt = g.rRate != null ? Math.round(g.rRate*100)+'%' : '—';
+            const stabIcon   = g.stability==='high' ? '🟢' : g.stability==='medium' ? '🟡' : g.stability==='unknown' ? '⬜' : '🔴';
             const rowBg = isPinned ? '#071a14' : isLow ? '#16100a' : '';
             return `<tr style="background:${rowBg}" id="ctx-row-${cfg.id}-${gi}">
               <td>
                 <div style="display:flex;align-items:center;gap:4px">
-                  ${isLow ? '<span title="Ít mẫu, dùng cẩn thận" style="color:#d97706;font-size:10px">⚠️</span>' : ''}
+                  ${isLow ? '<span title="Ít mẫu" style="color:#d97706;font-size:10px">⚠️</span>' : ''}
                   ${ctxViz(g.colDefs)}
                   <span style="color:#334155;font-size:10px;margin:0 2px">+</span>
                   ${patternMini(cfg.pattern)}
                 </div>
               </td>
-              <td style="color:${isLow?'#d97706':'#94a3b8'};font-weight:${isLow?700:400}">${g.count}</td>
-              <td>${g.chan}<span class="bar bar-c" style="width:${Math.round(g.chan/g.count*40)}px"></span></td>
-              <td>${g.le}<span class="bar bar-l" style="width:${Math.round(g.le/g.count*40)}px"></span></td>
-              <td style="font-weight:700;color:${rateColor(hr)}">${pct(g[ctxBestType],g.count)}
-                <span style="font-size:10px;color:#475569;margin-left:2px">${ctxBestType==='chan'?'C':'L'}</span>
+              <td style="color:${isLow?'#d97706':'#94a3b8'}">${g.count}</td>
+              <td style="font-weight:700;color:${rateColor(g.hitRate)}">${Math.round(g.hitRate*100)}%
+                <span style="font-size:9px;color:#475569">${g.ctxBestType==='chan'?'C':'L'}</span>
               </td>
-              <td><span class="badge ${shouldBetCtx?'b-bet':'b-nobet'}" style="font-size:9px;opacity:${isLow?.6:1}">${shouldBetCtx?'BET':'—'}</span></td>
+              <td style="color:#a78bfa;font-weight:600">${Math.round(g.wilson*100)}%</td>
+              <td>${trendIcon} <span style="font-size:10px;color:#64748b">${rRateTxt}</span></td>
+              <td>${stabIcon}</td>
+              <td>
+                <div style="width:${Math.round(g.combinedScore*60)}px;height:5px;background:#2563eb;border-radius:3px;display:inline-block;vertical-align:middle"></div>
+                <span style="font-size:9px;color:#475569;margin-left:3px">${(g.combinedScore*100).toFixed(0)}</span>
+              </td>
+              <td><span class="badge ${g.shouldBetCtx?'b-bet':'b-nobet'}" style="font-size:9px;opacity:${isLow?.6:1}">${g.shouldBetCtx?'BET':'—'}</span></td>
               <td>
                 ${isPinned
                   ? `<button class="btn-sm" style="background:#14532d;color:#4ade80;font-size:10px"
                        onclick="unpinPreContext('${cfg.id}','${ctxKey}')">📌 Đã pin</button>`
                   : `<button class="btn-sm ${isLow?'':'btn-secondary'}" style="font-size:10px;${isLow?'background:#422006;color:#fbbf24;':''}"
-                       onclick="pinPreContext('${cfg.id}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${ctxBestType}',${shouldBetCtx},${hr.toFixed(4)},${g.count})">📌 Pin${isLow?' ⚠️':''}</button>`
+                       onclick="pinPreContext('${cfg.id}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${g.ctxBestType}',${g.shouldBetCtx},${g.hitRate.toFixed(4)},${g.count})">📌 Pin${isLow?' ⚠️':''}</button>`
                 }
               </td>
             </tr>`;
@@ -763,20 +953,17 @@ function refreshContextTable(cfgId) {
   rec.topContexts.forEach((g, gi) => {
     const ctxKey   = g.colDefs.map(c => c.rows + c.type[0]).join('|');
     const isPinned = (cfg.preContexts||[]).some(p => p.key === ctxKey);
-    const ctxBestType = g.chan >= g.le ? 'chan' : 'le';
-    const hr           = g[ctxBestType] / g.count;
-    const shouldBetCtx = hr >= threshold / 100;
     const row = document.getElementById(`ctx-row-${cfgId}-${gi}`);
     if (!row) return;
 
-    row.style.background = isPinned ? '#071a14' : '';
+    row.style.background = isPinned ? '#071a14' : g.lowSample ? '#16100a' : '';
     const tdBtn = row.querySelector('td:last-child');
     if (tdBtn) {
       tdBtn.innerHTML = isPinned
         ? `<button class="btn-sm" style="background:#14532d;color:#4ade80;font-size:10px"
              onclick="unpinPreContext('${cfgId}','${ctxKey}')">📌 Đã pin</button>`
-        : `<button class="btn-sm btn-secondary" style="font-size:10px"
-             onclick="pinPreContext('${cfgId}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${ctxBestType}',${shouldBetCtx},${hr.toFixed(4)},${g.count})">📌 Pin</button>`;
+        : `<button class="btn-sm ${g.lowSample?'':'btn-secondary'}" style="font-size:10px;${g.lowSample?'background:#422006;color:#fbbf24;':''}"
+             onclick="pinPreContext('${cfgId}','${ctxKey}',${JSON.stringify(g.colDefs).replace(/"/g,'&quot;')},'${g.ctxBestType}',${g.shouldBetCtx},${g.hitRate.toFixed(4)},${g.count})">📌 Pin${g.lowSample?' ⚠️':''}</button>`;
     }
   });
 }

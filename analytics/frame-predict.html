@@ -1269,7 +1269,7 @@
             </span>
           </span>
         </h2>
-        <button id="btn-quick-add" class="btn-secondary btn-sm" onclick="toggleQuickAdd()" style="white-space:nowrap;flex-shrink:0;">＋ Nhanh</button>
+        <button id="btn-quick-add" class="btn-secondary btn-sm" onclick="toggleQuickAdd()" style="display:none;">＋ Nhanh</button>
       </div>
       <div id="frame-row">
         <div id="frame-scroll">
@@ -1975,16 +1975,16 @@
       const blk23 = [{ ...blk2[0] }, { ...blk3[0] }];
       const now = Date.now();
       const testPredHistory = [
-        { ts: now - 120 * 60000, roundId: 'tg1',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ' },
-        { ts: now - 110 * 60000, roundId: 'tg2',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,  cfgNames: '2C 2L BET' },
-        { ts: now - 100 * 60000, roundId: 'tg3',  predictType: 'le',   hasBet: false, actualType: 'le',   actualReds: 3, correct: true,  blocks: blk2,  cfgNames: '2C 2L Extended' },
-        { ts: now - 90  * 60000, roundId: 'tg4',  predictType: 'le',   hasBet: true,  actualType: 'chan',  actualReds: 2, correct: false, blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET' },
-        { ts: now - 80  * 60000, roundId: 'tg5',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ' },
-        { ts: now - 70  * 60000, roundId: 'tg6',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET' },
-        { ts: now - 60  * 60000, roundId: 'tg7',  predictType: 'chan',  hasBet: false, actualType: 'chan',  actualReds: 4, correct: true,  blocks: blk2,  cfgNames: '2C 2L Extended' },
-        { ts: now - 50  * 60000, roundId: 'tg8',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,  cfgNames: '2C 2L BET' },
-        { ts: now - 40  * 60000, roundId: 'tg9',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ' },
-        { ts: now - 30  * 60000, roundId: 'tg10', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET' },
+        { ts: now - 120 * 60000, roundId: 'tg1',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ',             cfgIds: ['cfg_t1'] },
+        { ts: now - 110 * 60000, roundId: 'tg2',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,  cfgNames: '2C 2L BET',                cfgIds: ['cfg_t3'] },
+        { ts: now - 100 * 60000, roundId: 'tg3',  predictType: 'le',   hasBet: false, actualType: 'le',   actualReds: 3, correct: true,  blocks: blk2,  cfgNames: '2C 2L Extended',           cfgIds: ['cfg_t2'] },
+        { ts: now - 90  * 60000, roundId: 'tg4',  predictType: 'le',   hasBet: true,  actualType: 'chan',  actualReds: 2, correct: false, blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET', cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 80  * 60000, roundId: 'tg5',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ',             cfgIds: ['cfg_t1'] },
+        { ts: now - 70  * 60000, roundId: 'tg6',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET', cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 60  * 60000, roundId: 'tg7',  predictType: 'chan',  hasBet: false, actualType: 'chan',  actualReds: 4, correct: true,  blocks: blk2,  cfgNames: '2C 2L Extended',           cfgIds: ['cfg_t2'] },
+        { ts: now - 50  * 60000, roundId: 'tg8',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,  cfgNames: '2C 2L BET',                cfgIds: ['cfg_t3'] },
+        { ts: now - 40  * 60000, roundId: 'tg9',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ',             cfgIds: ['cfg_t1'] },
+        { ts: now - 30  * 60000, roundId: 'tg10', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET', cfgIds: ['cfg_t2', 'cfg_t3'] },
       ];
 
       // ── pctHist (sparkline data) ──
@@ -2419,8 +2419,8 @@
 
     <div style="font-size:11px;margin-bottom:10px;">${pendingInfo}</div>
 
-    <!-- ── DƯỚI: pct steps + nút mở sidebar ── -->
-    <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;">
+    <!-- ── DƯỚI: pct steps + inline history ── -->
+    <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;align-items:start;">
 
       <div>
         ${pctHist.length ? `
@@ -2435,11 +2435,68 @@
         <div style="font-size:11px;color:#2d3f55;padding:4px 0;">Chưa có bước nào.</div>`}
       </div>
 
-      <button onclick="toggleHistSidebar()" style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;padding:10px 12px;cursor:pointer;color:#64748b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;display:flex;flex-direction:column;align-items:center;gap:5px;transition:border-color .15s,color .15s;" onmouseover="this.style.borderColor='#3b82f6';this.style.color='#93c5fd'" onmouseout="this.style.borderColor='#1e2e42';this.style.color='#64748b'">
-        <span style="font-size:16px;">📋</span>
-        <span>Lịch Sử</span>
-        ${predHistory.length ? `<span style="color:#334155;font-size:9px;">${predHistory.length}</span>` : ''}
-      </button>
+      <!-- Inline history list -->
+      <div style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;overflow:hidden;">
+        <div style="padding:5px 10px;border-bottom:1px solid #1e2e42;display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:9px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.05em;">Lịch sử${predHistory.length ? ` · ${predHistory.length}` : ''}</span>
+          <button onclick="toggleHistSidebar()" style="background:none;border:none;cursor:pointer;color:#334155;font-size:9px;padding:0;line-height:1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#334155'">Chi tiết →</button>
+        </div>
+        ${predHistory.length ? `
+        <div style="max-height:320px;overflow-y:auto;padding:6px;">
+          ${predHistory.slice().reverse().slice(0, 30).map(r => {
+            const d = new Date(r.ts);
+            const timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+
+            // Circle builder
+            const circle = (type) => {
+              const isChan = type === 'chan';
+              const bg = isChan ? '#e2e8f0' : '#dc2626';
+              const fg = isChan ? '#0f172a' : '#fff';
+              const label = isChan ? 'C' : 'L';
+              return `<div style="width:28px;height:28px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:${fg};flex-shrink:0;">${label}</div>`;
+            };
+
+            // Dice dots row
+            const diceDots = r.actualReds != null
+              ? Array.from({length: 4}, (_, i) => {
+                  const isRed = i < r.actualReds;
+                  return `<div style="width:14px;height:14px;border-radius:50%;background:${isRed ? '#dc2626' : '#ffffff'};border:1.5px solid ${isRed ? '#991b1b' : '#94a3b8'};"></div>`;
+                }).join('')
+              : '';
+
+            const tickIcon = r.correct ? '✅' : '❌';
+            const bpBadge = r.hasBet
+              ? `<span style="background:#14532d;color:#4ade80;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">B</span>`
+              : `<span style="background:#1c1007;color:#d97706;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">P</span>`;
+            const cardBg = r.correct ? '#051209' : '#0d0404';
+            const cardBorder = r.correct ? '#0f2d18' : '#2d0f0f';
+            const firstCfgId = r.cfgIds?.[0];
+            const clickable = firstCfgId ? `cursor:pointer;` : '';
+            const onclick = firstCfgId ? `onclick="openModal('${firstCfgId}')"` : '';
+            const hoverStyle = firstCfgId ? `onmouseover="this.style.borderColor='#475569'" onmouseout="this.style.borderColor='${cardBorder}'"` : '';
+
+            return `<div style="background:${cardBg};border:1px solid ${cardBorder};border-radius:8px;padding:9px 11px;margin-bottom:5px;${clickable}" ${onclick} ${hoverStyle}>
+              <!-- Line 1: circles | dots + tick -->
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                ${circle(r.predictType)}
+                <span style="color:#475569;font-size:12px;">→</span>
+                ${circle(r.actualType)}
+                <div style="width:1px;height:20px;background:#1e2e42;flex-shrink:0;margin:0 2px;"></div>
+                ${diceDots ? `<div style="display:flex;align-items:center;gap:4px;">${diceDots}</div>` : ''}
+                <span style="flex:1;"></span>
+                <span style="font-size:15px;">${tickIcon}</span>
+              </div>
+              <!-- Line 2: time + B/P + cfg name hint -->
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
+                <span style="font-size:10px;color:#334155;">${timeStr} · ${dateStr}</span>
+                ${r.cfgNames ? `<span style="font-size:9px;color:#1e3a5f;flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.cfgNames}</span>` : ''}
+                ${bpBadge}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>` : `<div style="padding:12px 10px;font-size:10px;color:#2d3f55;">Chưa có lịch sử.</div>`}
+      </div>
 
     </div>
   `;
@@ -3072,14 +3129,9 @@
     }
 
     function exitQuickAdd() {
-      quickAddMode = false;
       _qaDragging = false;
       _qaStartFi = _qaEndFi = -1;
       qaSelFi = { start: -1, end: -1 };
-      const btn = document.getElementById('btn-quick-add');
-      if (btn) btn.classList.remove('qa-active');
-      const nums = document.getElementById('frame-col-nums');
-      if (nums) nums.classList.remove('qa-mode');
       document.getElementById('quick-add-panel').classList.remove('visible');
       updateQAHighlight(-1, -1);
     }
@@ -3179,7 +3231,6 @@
       const nums = document.getElementById('frame-col-nums');
 
       nums.addEventListener('mousedown', e => {
-        if (!quickAddMode) return;
         e.preventDefault();
         const rect = nums.getBoundingClientRect();
         const slot = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / 40), MAX_COLS - 1));
@@ -3192,7 +3243,7 @@
       });
 
       document.addEventListener('mousemove', e => {
-        if (!_qaDragging || !quickAddMode) return;
+        if (!_qaDragging) return;
         const rect = nums.getBoundingClientRect();
         const slot = Math.max(0, Math.min(Math.floor((e.clientX - rect.left) / 40), MAX_COLS - 1));
         const fi = slot + _frameDisplayStart;
@@ -3200,7 +3251,7 @@
       });
 
       document.addEventListener('mouseup', () => {
-        if (!_qaDragging || !quickAddMode) return;
+        if (!_qaDragging) return;
         _qaDragging = false;
         const sFi = Math.min(_qaStartFi, _qaEndFi);
         const eFi = Math.max(_qaStartFi, _qaEndFi);
@@ -3755,24 +3806,43 @@
         </div>`;
 
         rightContent += breaks.slice(0, 30).map(b => {
-          const time   = new Date(b.ts).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-          const expStr = b.expected ? `${b.expected.type === 'chan' ? 'C' : 'L'}${b.expected.count}` : '?';
-          const actStr = b.actual   ? `${b.actual.type   === 'chan' ? 'C' : 'L'}${b.actual.count}`   : '?';
-          const rp = b.rowPct ?? b.pctBefore;
-          const rowTag = b.breakRow != null
-            ? `<span style="background:#1c1007;color:#fbbf24;padding:0 3px;border-radius:2px;font-size:7px;font-weight:700;flex-shrink:0;">row ${b.breakRow}/${b.totalRows}</span>`
-            : `<span style="background:#431407;color:#fdba74;padding:0 3px;border-radius:2px;font-size:7px;font-weight:700;flex-shrink:0;">${rp}%</span>`;
+          const d = new Date(b.ts);
+          const timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+          const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+
+          // Where the break happened
+          const colNum = b.breakColIdx + 1;
+          const sameType = b.actual && b.expected && b.actual.type === b.expected.type;
+          const breakRowInCol = sameType ? Math.min(b.actual.count, b.expected.count) : 0;
+          const breakLabel = breakRowInCol > 0
+            ? `Gãy dòng ${breakRowInCol} cột ${colNum}`
+            : `Gãy cột ${colNum}`;
+
+          // Progress tags
+          const matchedCols = b.breakColIdx;
+          const totalCols   = b.patTotal;
+          const matchedRows = b.breakRow ?? 0;
+          const totalRows   = b.totalRows ?? 0;
+
+          const tagStyle = (bg, fg) => `background:${bg};color:${fg};padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;`;
+          const breakTag = `<span style="${tagStyle('#450a0a','#fca5a5')}">${breakLabel}</span>`;
+          const colTag   = `<span style="${tagStyle('#0c1a2e','#93c5fd')}">Cột ${matchedCols}/${totalCols}</span>`;
+          const rowTag   = `<span style="${tagStyle('#1c1007','#fcd34d')}">Dòng ${matchedRows}/${totalRows}</span>`;
+          const pctBadge = `<span style="font-size:10px;color:#475569;white-space:nowrap;flex-shrink:0;">Khớp ${b.pctBefore}%</span>`;
+
           const visual = pattern ? breakVisualHtml(pattern, b) : '';
-          return `<div style="padding:5px 10px;border-bottom:1px solid #0a1525;">
-            <div style="display:flex;align-items:flex-start;gap:6px;">
-              ${visual ? `<div style="flex-shrink:0;padding-top:1px;">${visual}</div>` : ''}
-              <div style="flex:1;min-width:0;">
-                <div style="display:flex;align-items:center;gap:3px;margin-bottom:3px;">
-                  ${rowTag}
-                  <span style="color:#334155;font-size:7px;margin-left:auto;white-space:nowrap;flex-shrink:0;">${time}</span>
-                </div>
-                <div style="font-size:8px;color:#64748b;">cột ${b.breakColIdx + 1}: ${expStr} ≠ <span style="color:#f87171;">${actStr}</span></div>
-              </div>
+
+          return `<div style="padding:8px 10px;border-bottom:1px solid #0a1525;">
+            <!-- Line 1: break location + progress tags -->
+            <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:7px;">
+              ${breakTag}${colTag}${rowTag}
+            </div>
+            <!-- Line 2: visual -->
+            ${visual ? `<div style="margin-bottom:7px;">${visual}</div>` : ''}
+            <!-- Line 3: time + pctBefore -->
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:10px;color:#334155;">${timeStr} · ${dateStr}</span>
+              ${pctBadge}
             </div>
           </div>`;
         }).join('');
@@ -4062,7 +4132,14 @@
        EXPORT / IMPORT
     ────────────────────────────────────── */
     function exportConfigs() {
-      const blob = new Blob([JSON.stringify(configs, null, 2)], { type: 'application/json' });
+      const payload = {
+        version: '2',
+        exportedAt: new Date().toISOString(),
+        configs,
+        cfgPredHistory:  ls(CFG_HIST_KEY,   {}),
+        cfgBreakHistory: ls(CFG_BREAK_KEY,  {}),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -4286,6 +4363,7 @@
             correct,
             blocks: pending.blocks ? pending.blocks.map(b => ({ ...b })) : [],
             cfgNames: pending.configName || '',
+            cfgIds: (pending.matchedCfgs || []).map(m => m.id),
           });
           saveStats();
           saveHist();
@@ -4403,6 +4481,8 @@
     refresh();
     if (document.getElementById('chk-auto').checked) startPoll();
     _initQAEvents();
+    quickAddMode = true;
+    document.getElementById('frame-col-nums').classList.add('qa-mode');
   </script>
 
 </body>

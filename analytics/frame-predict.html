@@ -152,6 +152,7 @@
       position: relative;
       display: inline-block;
       vertical-align: top;
+      padding-top: 24px;
     }
 
     /* Hàng số cột */
@@ -314,7 +315,7 @@
     /* SVG outline — histogram hug-fit */
     #frame-pulse-contour {
       position: absolute;
-      top: 22px;   /* col-nums(18) + margin(2) + border-top grid(1) + 1 */
+      top: 46px;   /* padding(24) + col-nums(18) + margin(2) + border-top grid(1) + 1 */
       left: 1px;   /* bù border-left 1px của #frame-grid */
       pointer-events: none;
       overflow: visible;
@@ -357,6 +358,14 @@
       50% {
         stroke: #93c5fd;
       }
+    }
+
+    @keyframes match-label-pulse {
+      0%, 100% { background: rgba(14,42,74,0.8); color: #3b82f6; }
+      50%       { background: rgba(30,64,120,0.9); color: #93c5fd; }
+    }
+    .frame-match-label {
+      animation: match-label-pulse 1.4s ease-in-out infinite;
     }
 
     @keyframes fsvg-pred-pulse {
@@ -3404,6 +3413,38 @@
         if (pp && pp.colIdx >= frame.length) {
           const pSlot = pp.colIdx - startFrame;
           svgPath(histogramPath([1], pSlot * CELL_PX, CELL_PX), 'fsvg-pred');
+        }
+
+        // ── Name label (trên padding-top) + click overlay trên cells ──
+        if (mSlot >= 0) {
+          const matchCols = frame.length - matchStart;
+          const firstName = matched[0].name || matched[0].id;
+          const extra = matched.length > 1 ? ` +${matched.length - 1}` : '';
+          const openCfg = () => openModal(matched[0].id);
+
+          // Label nhấp nháy phía trên số cột
+          const lbl = document.createElement('div');
+          lbl.className = 'frame-match-box frame-match-label';
+          lbl.title = matched.map(m => m.name || m.id).join('\n');
+          const lblRightPx = (MAX_COLS - (mSlot + matchCols)) * CELL_PX;
+          lbl.style.cssText = `position:absolute;right:${lblRightPx}px;top:2px;`
+            + `width:max-content;max-width:${(mSlot + matchCols) * CELL_PX}px;height:20px;`
+            + `display:flex;align-items:center;padding:0 6px;`
+            + `border-radius:4px;cursor:pointer;z-index:10;pointer-events:auto;`;
+          lbl.innerHTML = `<span style="font-size:10px;font-weight:700;white-space:nowrap;">`
+            + `${esc(firstName)}${esc(extra)}</span>`;
+          lbl.onclick = openCfg;
+          wrap.appendChild(lbl);
+
+          // Transparent overlay để click vào vùng cells khớp
+          const ov = document.createElement('div');
+          ov.className = 'frame-match-box';
+          ov.style.cssText = `position:absolute;left:${mSlot * CELL_PX + 1}px;`
+            + `top:${24 + 20}px;`
+            + `width:${matchCols * CELL_PX}px;height:${MAX_ROWS * CELL_PX}px;`
+            + `cursor:pointer;z-index:6;pointer-events:auto;`;
+          ov.onclick = openCfg;
+          wrap.appendChild(ov);
         }
       }
     }

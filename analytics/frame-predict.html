@@ -2695,18 +2695,9 @@
 
         // Tầng 1 — base pattern
         const tail = fr.slice(-P);
-        const baseMatch = cfg.pattern.every((pp, i) => {
-          if (tail[i].type !== pp.type || tail[i].count !== pp.rows) return false;
-          if (pp.reds && pp.reds.length) {
-            for (let r = 0; r < pp.reds.length; r++) {
-              const req = pp.reds[r];
-              if (req == null) continue;
-              const actual = tail[i].reds ? tail[i].reds[r] : null;
-              if (actual !== req) return false;
-            }
-          }
-          return true;
-        });
+        const baseMatch = cfg.pattern.every((pp, i) =>
+          tail[i].type === pp.type && tail[i].count === pp.rows
+        );
         if (!baseMatch) continue;
 
         // Tầng 2 — tìm pre-context khớp (nếu có)

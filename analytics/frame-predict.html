@@ -31,9 +31,9 @@
 
     /* ── Layout ── */
     #app {
-      max-width: 1080px;
+      max-width: 1600px;
       margin: 0 auto;
-      padding: 14px;
+      padding: 14px 24px;
       display: flex;
       flex-direction: column;
       gap: 14px;
@@ -158,7 +158,7 @@
     /* Hàng số cột */
     #frame-col-nums {
       display: grid;
-      grid-template-columns: repeat(15, 40px);
+      grid-template-columns: repeat(15, 48px);
       margin-bottom: 2px;
     }
 
@@ -182,16 +182,16 @@
     /* Grid bảng caro */
     #frame-grid {
       display: grid;
-      grid-template-columns: repeat(15, 40px);
-      grid-template-rows: repeat(6, 40px);
+      grid-template-columns: repeat(15, 48px);
+      grid-template-rows: repeat(6, 48px);
       border-top: 1px solid #2d3f55;
       border-left: 1px solid #2d3f55;
     }
 
     /* Ô vuông — chứa vòng tròn bên trong */
     .fc {
-      width: 40px;
-      height: 40px;
+      width: 48px;
+      height: 48px;
       border-right: 1px solid #2d3f55;
       border-bottom: 1px solid #2d3f55;
       display: flex;
@@ -201,13 +201,13 @@
 
     /* Vòng tròn bên trong ô */
     .fci {
-      width: 28px;
-      height: 28px;
+      width: 34px;
+      height: 34px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 800;
       user-select: none;
     }
@@ -1156,9 +1156,46 @@
       min-width: 0;
     }
 
+    /* Multi-match panel */
+    #multi-match-panel {
+      width: 280px;
+      flex-shrink: 0;
+      border-left: 1px solid #1e2e42;
+      display: flex;
+      flex-direction: column;
+      background: #080e1a;
+      align-self: stretch;
+    }
+    #mm-panel-hdr {
+      padding: 10px 12px 9px;
+      border-bottom: 1px solid #1e2e42;
+      flex-shrink: 0;
+    }
+    #mm-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 340px;
+    }
+    .mm-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-bottom: 1px solid #0a1525;
+      cursor: pointer;
+      transition: background .12s;
+    }
+    .mm-item:hover { background: #0f1e2e; }
+    .mm-item.mm-primary { background: #091525; border-left: 2px solid #3b82f6; }
+    .mm-type-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
     /* Near-match panel */
     #near-match-panel {
-      width: 350px;
+      width: 280px;
       flex-shrink: 0;
       border-left: 1px solid #1e2e42;
       display: flex;
@@ -1174,7 +1211,7 @@
     #nm-panel-body {
       flex: 1;
       overflow-y: auto;
-      max-height: 262px;
+      max-height: 340px;
     }
     .nm-thr-btn {
       padding: 3px 7px;
@@ -1289,6 +1326,17 @@
               <svg id="frame-pulse-contour" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
             </div>
           </div>
+        </div>
+
+        <!-- ── Multi-match panel ── -->
+        <div id="multi-match-panel">
+          <div id="mm-panel-hdr">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.05em;">ĐANG KHỚP</span>
+              <span id="mm-count" style="font-size:10px;color:#3b82f6;font-weight:700;"></span>
+            </div>
+          </div>
+          <div id="mm-panel-body"></div>
         </div>
 
         <!-- ── Near-match panel ── -->
@@ -1679,7 +1727,7 @@
         return (_s >>> 0) / 0x100000000;
       }
 
-      // ── 4 test configs ──
+      // ── Test configs ──
       const testCfgs = [
         {
           id: 'cfg_t1',
@@ -1724,6 +1772,42 @@
           shouldBet: false,
           enabled: false,
           note: 'Test: tắt + có vị',
+        },
+        // ── 3 config thêm khớp frame để test multi-match panel ──
+        {
+          id: 'cfg_t5',
+          name: '2C 2L → Lẻ Predict',
+          pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }],
+          predictType: 'le',
+          shouldBet: false,
+          enabled: true,
+          note: 'Test: multi-match conflict (dự đoán Lẻ ngược t2/t3)',
+        },
+        {
+          id: 'cfg_t6',
+          name: '2C 2L Lẻ BET',
+          pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }],
+          predictType: 'le',
+          shouldBet: true,
+          enabled: true,
+          note: 'Test: multi-match + BET Lẻ (xung đột với t3)',
+          preContexts: [{
+            key: 'ctx_le3_t6',
+            cols: [{ type: 'le', rows: 3 }],
+            predictType: 'le',
+            shouldBet: true,
+            hitRate: 0.68,
+            count: 12,
+          }],
+        },
+        {
+          id: 'cfg_t7',
+          name: 'L3 2C 2L → Chẵn',
+          pattern: [{ type: 'le', rows: 3 }, { type: 'chan', rows: 2 }, { type: 'le', rows: 2 }],
+          predictType: 'chan',
+          shouldBet: false,
+          enabled: true,
+          note: 'Test: 3-col pattern khớp frame (le3 → c2 → le2)',
         },
         // ── Near-match test configs (khớp 50-80% frame hiện tại) ──
         {
@@ -1867,23 +1951,36 @@
       }
 
       // cfg_t1: hot streak (last 5 all correct)
-      const hist1 = makeHist('cfg_t1', 20, 0.6, 0.85);
+      const hist1 = makeHist('cfg_t1', 30, 0.6, 0.85);
       for (let i = hist1.length - 5; i < hist1.length; i++) {
         hist1[i].correct = true;
         hist1[i].actualType = hist1[i].predictType;
       }
 
       // cfg_t2: above-average, mixed bet
-      const hist2 = makeHist('cfg_t2', 25, 0.72, 0.6);
+      const hist2 = makeHist('cfg_t2', 35, 0.72, 0.6);
 
       // cfg_t3: recent downtrend (last 5 all wrong)
-      const hist3 = makeHist('cfg_t3', 18, 0.55, 0.75);
+      const hist3 = makeHist('cfg_t3', 28, 0.55, 0.75);
       for (let i = hist3.length - 5; i < hist3.length; i++) {
         hist3[i].correct = false;
         hist3[i].actualType = hist3[i].predictType === 'le' ? 'chan' : 'le';
       }
 
-      const testCfgHistory = { cfg_t1: hist1, cfg_t2: hist2, cfg_t3: hist3 };
+      // cfg_t5: low sample, unstable
+      const hist5 = makeHist('cfg_t5', 8, 0.5, 0.5);
+
+      // cfg_t6: good recent form
+      const hist6 = makeHist('cfg_t6', 22, 0.68, 0.8);
+      for (let i = hist6.length - 4; i < hist6.length; i++) {
+        hist6[i].correct = true;
+        hist6[i].actualType = hist6[i].predictType;
+      }
+
+      // cfg_t7: long history, mediocre accuracy
+      const hist7 = makeHist('cfg_t7', 45, 0.53, 0.55);
+
+      const testCfgHistory = { cfg_t1: hist1, cfg_t2: hist2, cfg_t3: hist3, cfg_t5: hist5, cfg_t6: hist6, cfg_t7: hist7 };
 
       // ── cfgBreakHistory ──
       function makeBreaks(cfgId, pattern, specs) {
@@ -1962,8 +2059,33 @@
         { pctBefore: 66, prefixBefore: 2, patTotal: 3, breakColIdx: 2, expected: { type: 'le', count: 3 }, actual: { type: 'le', count: 4 } },
       ]);
 
+      // cfg_t5: [C2,L2] — ít break data (mới, ít sample)
+      const brk_t5 = makeBreaks('cfg_t5', patOf('cfg_t5'), [
+        { pctBefore: 50, prefixBefore: 1, patTotal: 2, breakColIdx: 1, expected: { type: 'le', count: 2 }, actual: { type: 'chan', count: 1 } },
+        { pctBefore: 100, prefixBefore: 2, patTotal: 2, breakColIdx: 0, expected: { type: 'chan', count: 2 }, actual: { type: 'le', count: 3 }, wasFullMatch: true },
+      ]);
+
+      // cfg_t6: [C2,L2] — break mostly ở cột 1 (50%)
+      const brk_t6 = makeBreaks('cfg_t6', patOf('cfg_t6'), [
+        { pctBefore: 100, prefixBefore: 2, patTotal: 2, breakColIdx: 0, expected: { type: 'chan', count: 2 }, actual: { type: 'le', count: 2 }, wasFullMatch: true },
+        { pctBefore: 50,  prefixBefore: 1, patTotal: 2, breakColIdx: 1, expected: { type: 'le', count: 2 }, actual: { type: 'chan', count: 3 } },
+        { pctBefore: 100, prefixBefore: 2, patTotal: 2, breakColIdx: 0, expected: { type: 'chan', count: 2 }, actual: { type: 'chan', count: 1 }, wasFullMatch: true },
+        { pctBefore: 50,  prefixBefore: 1, patTotal: 2, breakColIdx: 1, expected: { type: 'le', count: 2 }, actual: { type: 'le', count: 4 } },
+      ]);
+
+      // cfg_t7: [L3,C2,L2] — break nhiều mức
+      const brk_t7 = makeBreaks('cfg_t7', patOf('cfg_t7'), [
+        { pctBefore: 66, prefixBefore: 2, patTotal: 3, breakColIdx: 2, expected: { type: 'le', count: 2 }, actual: { type: 'chan', count: 2 } },
+        { pctBefore: 33, prefixBefore: 1, patTotal: 3, breakColIdx: 1, expected: { type: 'chan', count: 2 }, actual: { type: 'le', count: 1 } },
+        { pctBefore: 66, prefixBefore: 2, patTotal: 3, breakColIdx: 2, expected: { type: 'le', count: 2 }, actual: { type: 'le', count: 3 } },
+        { pctBefore: 100, prefixBefore: 3, patTotal: 3, breakColIdx: 0, expected: { type: 'le', count: 3 }, actual: { type: 'chan', count: 2 }, wasFullMatch: true },
+        { pctBefore: 33, prefixBefore: 1, patTotal: 3, breakColIdx: 1, expected: { type: 'chan', count: 2 }, actual: { type: 'chan', count: 3 } },
+        { pctBefore: 66, prefixBefore: 2, patTotal: 3, breakColIdx: 2, expected: { type: 'le', count: 2 }, actual: { type: 'chan', count: 1 } },
+      ]);
+
       const testBreakHistory = {
         cfg_t1: brk_t1, cfg_t2: brk_t2,
+        cfg_t5: brk_t5, cfg_t6: brk_t6, cfg_t7: brk_t7,
         cfg_nm4: brk_nm4, cfg_nm2: brk_nm2, cfg_ctx1: brk_ctx1,
       };
 
@@ -1977,49 +2099,69 @@
         return { correct, total, betCorrect, betTotal };
       }
 
-      // ── predHistory (10 records with blocks) ──
-      const blk1  = [{ id: 'cfg_t1', pattern: [{ type: 'chan', rows: 4 }], predictType: 'le',   shouldBet: true,  isExtended: false, name: 'Bệt 4C → Lẻ',     ctxCols: null }];
-      const blk2  = [{ id: 'cfg_t2', pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'le',   shouldBet: true,  isExtended: true,  name: '2C 2L Extended', ctxCols: [{ type: 'le', rows: 3 }] }];
-      const blk3  = [{ id: 'cfg_t3', pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'chan',  shouldBet: true,  isExtended: false, name: '2C 2L BET',      ctxCols: null }];
-      const blk23 = [{ ...blk2[0] }, { ...blk3[0] }];
+      // ── predHistory (25 records with blocks) ──
+      const blk1   = [{ id: 'cfg_t1', pattern: [{ type: 'chan', rows: 4 }], predictType: 'le',  shouldBet: true,  isExtended: false, name: 'Bệt 4C → Lẻ',        ctxCols: null }];
+      const blk2   = [{ id: 'cfg_t2', pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'le', shouldBet: true, isExtended: true, name: '2C 2L Extended', ctxCols: [{ type: 'le', rows: 3 }] }];
+      const blk3   = [{ id: 'cfg_t3', pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'chan', shouldBet: true, isExtended: false, name: '2C 2L BET', ctxCols: null }];
+      const blk5   = [{ id: 'cfg_t5', pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'le', shouldBet: false, isExtended: false, name: '2C 2L → Lẻ Predict', ctxCols: null }];
+      const blk6   = [{ id: 'cfg_t6', pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'le', shouldBet: true, isExtended: true, name: '2C 2L Lẻ BET', ctxCols: [{ type: 'le', rows: 3 }] }];
+      const blk7   = [{ id: 'cfg_t7', pattern: [{ type: 'le', rows: 3 }, { type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'chan', shouldBet: false, isExtended: false, name: 'L3 2C 2L → Chẵn', ctxCols: null }];
+      const blk23  = [{ ...blk2[0] }, { ...blk3[0] }];
+      const blk567 = [{ ...blk5[0] }, { ...blk6[0] }, { ...blk7[0] }];
+      const blkAll = [{ ...blk2[0] }, { ...blk3[0] }, { ...blk5[0] }, { ...blk6[0] }, { ...blk7[0] }];
       const now = Date.now();
       const testPredHistory = [
-        { ts: now - 120 * 60000, roundId: 'tg1',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ',             cfgIds: ['cfg_t1'] },
-        { ts: now - 110 * 60000, roundId: 'tg2',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,  cfgNames: '2C 2L BET',                cfgIds: ['cfg_t3'] },
-        { ts: now - 100 * 60000, roundId: 'tg3',  predictType: 'le',   hasBet: false, actualType: 'le',   actualReds: 3, correct: true,  blocks: blk2,  cfgNames: '2C 2L Extended',           cfgIds: ['cfg_t2'] },
-        { ts: now - 90  * 60000, roundId: 'tg4',  predictType: 'le',   hasBet: true,  actualType: 'chan',  actualReds: 2, correct: false, blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET', cfgIds: ['cfg_t2', 'cfg_t3'] },
-        { ts: now - 80  * 60000, roundId: 'tg5',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ',             cfgIds: ['cfg_t1'] },
-        { ts: now - 70  * 60000, roundId: 'tg6',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET', cfgIds: ['cfg_t2', 'cfg_t3'] },
-        { ts: now - 60  * 60000, roundId: 'tg7',  predictType: 'chan',  hasBet: false, actualType: 'chan',  actualReds: 4, correct: true,  blocks: blk2,  cfgNames: '2C 2L Extended',           cfgIds: ['cfg_t2'] },
-        { ts: now - 50  * 60000, roundId: 'tg8',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,  cfgNames: '2C 2L BET',                cfgIds: ['cfg_t3'] },
-        { ts: now - 40  * 60000, roundId: 'tg9',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,  cfgNames: 'Bệt 4C → Lẻ',             cfgIds: ['cfg_t1'] },
-        { ts: now - 30  * 60000, roundId: 'tg10', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk23, cfgNames: '2C 2L Extended, 2C 2L BET', cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 240 * 60000, roundId: 'tg1',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,   cfgNames: 'Bệt 4C → Lẻ',                         cfgIds: ['cfg_t1'] },
+        { ts: now - 228 * 60000, roundId: 'tg2',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,   cfgNames: '2C 2L BET',                            cfgIds: ['cfg_t3'] },
+        { ts: now - 216 * 60000, roundId: 'tg3',  predictType: 'le',   hasBet: false, actualType: 'le',   actualReds: 3, correct: true,  blocks: blk2,   cfgNames: '2C 2L Extended',                       cfgIds: ['cfg_t2'] },
+        { ts: now - 204 * 60000, roundId: 'tg4',  predictType: 'le',   hasBet: true,  actualType: 'chan',  actualReds: 2, correct: false, blocks: blk23,  cfgNames: '2C 2L Extended, 2C 2L BET',            cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 192 * 60000, roundId: 'tg5',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk1,   cfgNames: 'Bệt 4C → Lẻ',                         cfgIds: ['cfg_t1'] },
+        { ts: now - 180 * 60000, roundId: 'tg6',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk23,  cfgNames: '2C 2L Extended, 2C 2L BET',            cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 168 * 60000, roundId: 'tg7',  predictType: 'chan',  hasBet: false, actualType: 'chan',  actualReds: 4, correct: true,  blocks: blk2,   cfgNames: '2C 2L Extended',                       cfgIds: ['cfg_t2'] },
+        { ts: now - 156 * 60000, roundId: 'tg8',  predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,   cfgNames: '2C 2L BET',                            cfgIds: ['cfg_t3'] },
+        { ts: now - 144 * 60000, roundId: 'tg9',  predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,   cfgNames: 'Bệt 4C → Lẻ',                         cfgIds: ['cfg_t1'] },
+        { ts: now - 132 * 60000, roundId: 'tg10', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk23,  cfgNames: '2C 2L Extended, 2C 2L BET',            cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 120 * 60000, roundId: 'tg11', predictType: 'le',   hasBet: true,  actualType: 'chan',  actualReds: 2, correct: false, blocks: blk567, cfgNames: '2C 2L → Lẻ Predict, 2C 2L Lẻ BET, L3 2C 2L → Chẵn', cfgIds: ['cfg_t5','cfg_t6','cfg_t7'] },
+        { ts: now - 108 * 60000, roundId: 'tg12', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk6,   cfgNames: '2C 2L Lẻ BET',                        cfgIds: ['cfg_t6'] },
+        { ts: now - 96  * 60000, roundId: 'tg13', predictType: 'chan',  hasBet: false, actualType: 'chan',  actualReds: 0, correct: true,  blocks: blk7,   cfgNames: 'L3 2C 2L → Chẵn',                     cfgIds: ['cfg_t7'] },
+        { ts: now - 84  * 60000, roundId: 'tg14', predictType: 'le',   hasBet: false, actualType: 'chan',  actualReds: 4, correct: false, blocks: blk5,   cfgNames: '2C 2L → Lẻ Predict',                  cfgIds: ['cfg_t5'] },
+        { ts: now - 72  * 60000, roundId: 'tg15', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blkAll, cfgNames: '2C 2L Extended, 2C 2L BET, 2C 2L → Lẻ Predict, 2C 2L Lẻ BET, L3 2C 2L → Chẵn', cfgIds: ['cfg_t2','cfg_t3','cfg_t5','cfg_t6','cfg_t7'] },
+        { ts: now - 60  * 60000, roundId: 'tg16', predictType: 'chan',  hasBet: true,  actualType: 'chan',  actualReds: 2, correct: true,  blocks: blk3,   cfgNames: '2C 2L BET',                            cfgIds: ['cfg_t3'] },
+        { ts: now - 52  * 60000, roundId: 'tg17', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk1,   cfgNames: 'Bệt 4C → Lẻ',                         cfgIds: ['cfg_t1'] },
+        { ts: now - 44  * 60000, roundId: 'tg18', predictType: 'le',   hasBet: true,  actualType: 'chan',  actualReds: 2, correct: false, blocks: blk6,   cfgNames: '2C 2L Lẻ BET',                        cfgIds: ['cfg_t6'] },
+        { ts: now - 36  * 60000, roundId: 'tg19', predictType: 'chan',  hasBet: false, actualType: 'chan',  actualReds: 0, correct: true,  blocks: blk7,   cfgNames: 'L3 2C 2L → Chẵn',                     cfgIds: ['cfg_t7'] },
+        { ts: now - 28  * 60000, roundId: 'tg20', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blk23,  cfgNames: '2C 2L Extended, 2C 2L BET',            cfgIds: ['cfg_t2', 'cfg_t3'] },
+        { ts: now - 22  * 60000, roundId: 'tg21', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blkAll, cfgNames: '2C 2L Extended, 2C 2L BET, 2C 2L → Lẻ Predict, 2C 2L Lẻ BET, L3 2C 2L → Chẵn', cfgIds: ['cfg_t2','cfg_t3','cfg_t5','cfg_t6','cfg_t7'] },
+        { ts: now - 16  * 60000, roundId: 'tg22', predictType: 'chan',  hasBet: true,  actualType: 'le',   actualReds: 1, correct: false, blocks: blk3,   cfgNames: '2C 2L BET',                            cfgIds: ['cfg_t3'] },
+        { ts: now - 12  * 60000, roundId: 'tg23', predictType: 'le',   hasBet: false, actualType: 'le',   actualReds: 3, correct: true,  blocks: blk5,   cfgNames: '2C 2L → Lẻ Predict',                  cfgIds: ['cfg_t5'] },
+        { ts: now - 8   * 60000, roundId: 'tg24', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 3, correct: true,  blocks: blk6,   cfgNames: '2C 2L Lẻ BET',                        cfgIds: ['cfg_t6'] },
+        { ts: now - 4   * 60000, roundId: 'tg25', predictType: 'le',   hasBet: true,  actualType: 'le',   actualReds: 1, correct: true,  blocks: blkAll, cfgNames: '2C 2L Extended, 2C 2L BET, 2C 2L → Lẻ Predict, 2C 2L Lẻ BET, L3 2C 2L → Chẵn', cfgIds: ['cfg_t2','cfg_t3','cfg_t5','cfg_t6','cfg_t7'] },
       ];
 
-      // ── pctHist (sparkline data) ──
+      // ── pctHist (sparkline data — 25 entries matching predHistory) ──
       const testPctHist = [];
-      let pp = 60.0, bp = 58.0;
-      for (let i = 0; i < 12; i++) {
-        const ts = now - (12 - i) * 9 * 60000;
-        const pt = Math.max(40, Math.min(85, pp + (rng() * 8 - 4)));
-        const bt = Math.max(40, Math.min(85, bp + (rng() * 10 - 5)));
+      let pp = 58.0, bp = 55.0;
+      for (let i = 0; i < 25; i++) {
+        const ts = now - (25 - i) * 9 * 60000;
+        const pt = Math.max(45, Math.min(82, pp + (rng() * 8 - 3.5)));
+        const bt = Math.max(42, Math.min(80, bp + (rng() * 10 - 4.5)));
         testPctHist.push({ ts, scope: 'predict', from: +pp.toFixed(1), to: +pt.toFixed(1) });
         testPctHist.push({ ts: ts + 500, scope: 'bet', from: +bp.toFixed(1), to: +bt.toFixed(1) });
         pp = pt; bp = bt;
       }
 
-      // ── pending (locked prediction from cfg_t2 extended match → Lẻ + BET) ──
+      // ── pending (5-config multi-match → xung đột, ưu tiên t2 extended → Lẻ BET) ──
       const testPending = {
         predictType: 'le',
         hasBet: true,
-        configName: '2C 2L Extended, 2C 2L BET',
-        blocks: [
-          { pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'le', shouldBet: true },
-          { pattern: [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }], predictType: 'le', shouldBet: true },
-        ],
+        configName: '2C 2L Extended, 2C 2L BET, 2C 2L → Lẻ Predict, 2C 2L Lẻ BET, L3 2C 2L → Chẵn',
+        blocks: blkAll,
         matchedCfgs: [
-          { id: 'cfg_t2', predictType: 'le', shouldBet: true },
-          { id: 'cfg_t3', predictType: 'le', shouldBet: true },
+          { id: 'cfg_t2', predictType: 'le',  shouldBet: true },
+          { id: 'cfg_t3', predictType: 'chan', shouldBet: true },
+          { id: 'cfg_t5', predictType: 'le',  shouldBet: false },
+          { id: 'cfg_t6', predictType: 'le',  shouldBet: true },
+          { id: 'cfg_t7', predictType: 'chan', shouldBet: false },
         ],
       };
 
@@ -2030,13 +2172,18 @@
 
       configs = testCfgs;
       frame = testFrame;
+      // Tính stats từ predHistory (17 correct / 25 total; bet: 15 correct / 20 total)
+      const _ph = testPredHistory;
       stats = {
-        predict: { correct: 7, total: 10 },
-        bet: { correct: 6, total: 9 },
+        predict: { correct: _ph.filter(r => r.correct).length, total: _ph.length },
+        bet: { correct: _ph.filter(r => r.hasBet && r.correct).length, total: _ph.filter(r => r.hasBet).length },
         cfg: {
           cfg_t1: histStat(hist1),
           cfg_t2: histStat(hist2),
           cfg_t3: histStat(hist3),
+          cfg_t5: histStat(hist5),
+          cfg_t6: histStat(hist6),
+          cfg_t7: histStat(hist7),
         },
       };
       cfgHistory = testCfgHistory;
@@ -2044,7 +2191,7 @@
       predHistory = testPredHistory;
       pctHist = testPctHist;
       pending = testPending;
-      lastSeenId = 'tg10';
+      lastSeenId = 'tg25';
 
       saveCfgs();
       saveStats();
@@ -2833,6 +2980,50 @@
       });
     }
 
+    function renderMultiMatchPanel() {
+      const panel = document.getElementById('multi-match-panel');
+      const body  = document.getElementById('mm-panel-body');
+      const count = document.getElementById('mm-count');
+      if (!panel || !body) return;
+
+      if (!matched.length) {
+        count.textContent = '';
+        body.innerHTML = `<div style="padding:12px 10px;color:#1e2e42;font-size:10px;">Chưa có cấu hình nào khớp</div>`;
+        return;
+      }
+      count.textContent = matched.length;
+
+      body.innerHTML = matched.map((cfg, idx) => {
+        const hist  = cfgHistory[cfg.id] || [];
+        const total = hist.length;
+        const wins  = hist.filter(h => h.correct).length;
+        const accTxt = total >= 3
+          ? `${Math.round(wins / total * 100)}% (${total})`
+          : total > 0 ? `${total} ván` : '—';
+
+        const typeDot = cfg.predictType === 'chan'
+          ? `<span class="mm-type-dot" style="background:#f1f5f9;" title="Chẵn"></span>`
+          : `<span class="mm-type-dot" style="background:#dc2626;" title="Lẻ"></span>`;
+
+        const betBadge = cfg.shouldBet
+          ? `<span style="font-size:8px;font-weight:700;color:#4ade80;background:#052e0f;padding:1px 4px;border-radius:3px;flex-shrink:0;">BET</span>`
+          : `<span style="font-size:8px;font-weight:700;color:#d97706;background:#1c0d00;padding:1px 4px;border-radius:3px;flex-shrink:0;">DỰ</span>`;
+
+        const primaryMark = idx === 0
+          ? `<span style="font-size:8px;color:#3b82f6;font-weight:800;flex-shrink:0;" title="Cấu hình chính đang dùng">★</span>`
+          : '';
+
+        return `<div class="mm-item ${idx === 0 ? 'mm-primary' : ''}" onclick="openModal('${cfg.id}')" title="Nhấn để chỉnh sửa">
+          ${typeDot}
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10px;font-weight:600;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(cfg.name || cfg.id)}</div>
+            <div style="font-size:9px;color:#475569;margin-top:1px;">${accTxt}</div>
+          </div>
+          ${betBadge}${primaryMark}
+        </div>`;
+      }).join('');
+    }
+
     function renderNearMatchPanel() {
       const body  = document.getElementById('nm-panel-body');
       const count = document.getElementById('nm-count');
@@ -3103,7 +3294,7 @@
     /* ──────────────────────────────────────
        RENDER — FRAME GRID
     ────────────────────────────────────── */
-    const CELL_PX = 40; // kích thước mỗi ô (px) — khớp CSS grid-template
+    const CELL_PX = 48; // kích thước mỗi ô (px) — khớp CSS grid-template
 
     /**
      * Vẽ đường viền ôm sát các ô có data (histogram outline).
@@ -3456,6 +3647,8 @@
       const panel = document.getElementById('pred-panel');
       const lbl = document.getElementById('match-label');
       panel.innerHTML = '';
+
+      renderMultiMatchPanel();
 
       if (!matched.length) {
         lbl.textContent = '';
@@ -4297,6 +4490,31 @@
     function recompute() {
       refreshDupGroups();
       matched = findMatches(frame, configs);
+
+      if (matched.length > 1) {
+        matched.sort((a, b) => {
+          // 1. Extended match (preContext khớp) trước
+          const aExt = a._ctx != null ? 1 : 0;
+          const bExt = b._ctx != null ? 1 : 0;
+          if (bExt !== aExt) return bExt - aExt;
+
+          // 2. Pattern dài hơn trước (khớp chặt hơn)
+          if (b.pattern.length !== a.pattern.length) return b.pattern.length - a.pattern.length;
+
+          // 3. shouldBet trước
+          const aBet = a.shouldBet ? 1 : 0;
+          const bBet = b.shouldBet ? 1 : 0;
+          if (bBet !== aBet) return bBet - aBet;
+
+          // 4. Accuracy thực tế cao hơn trước (min 3 ván, fallback 0.5)
+          const accOf = id => {
+            const h = cfgHistory[id] || [];
+            return h.length >= 3 ? h.filter(x => x.correct).length / h.length : 0.5;
+          };
+          return accOf(b.id) - accOf(a.id);
+        });
+      }
+
       computeNearMatches();
       renderGrid();
       renderPred();

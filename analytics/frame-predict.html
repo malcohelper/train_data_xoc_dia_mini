@@ -1452,6 +1452,7 @@
         </div>
 
         <div id="modal-ftr">
+          <button class="btn-ghost" id="btn-modal-delete" style="color:#ef4444;display:none;margin-right:auto;">🗑 Xóa</button>
           <button class="btn-secondary" id="btn-cancel">Hủy</button>
           <button class="btn-primary" id="btn-save">Lưu cấu hình</button>
         </div>
@@ -1466,6 +1467,19 @@
         <div id="modal-cfg-hist-body"></div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ── CONFIRM DELETE MODAL ── -->
+  <div id="confirm-delete-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1100;display:none;align-items:center;justify-content:center;">
+    <div style="background:#0f1c2e;border:1px solid #3b0f0f;border-radius:12px;padding:24px 28px;min-width:320px;max-width:420px;">
+      <div style="font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:8px;">🗑 Xóa cấu hình?</div>
+      <div id="confirm-delete-name" style="font-size:13px;color:#94a3b8;margin-bottom:6px;"></div>
+      <div style="font-size:11px;color:#475569;margin-bottom:20px;">Hành động này không thể hoàn tác. Lịch sử và thống kê của cấu hình cũng sẽ bị xóa.</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn-secondary" id="btn-confirm-delete-cancel">Hủy</button>
+        <button id="btn-confirm-delete-ok" style="background:#7f1d1d;color:#fca5a5;border:1px solid #991b1b;padding:6px 16px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Xóa cấu hình</button>
+      </div>
     </div>
   </div>
 
@@ -3887,6 +3901,7 @@
       editingId = id || null;
       const isEdit = editingId !== null;
       document.getElementById('modal-title').textContent = isEdit ? 'Chỉnh sửa cấu hình' : 'Thêm cấu hình';
+      document.getElementById('btn-modal-delete').style.display = isEdit ? 'inline-flex' : 'none';
 
       if (isEdit) {
         const cfg = configs.find(c => c.id === editingId);
@@ -4513,6 +4528,11 @@
           };
           return accOf(b.id) - accOf(a.id);
         });
+
+        // Chỉ matched[0] được bet — các item còn lại chỉ dự đoán để thu thập data
+        for (let i = 1; i < matched.length; i++) {
+          matched[i].shouldBet = false;
+        }
       }
 
       computeNearMatches();
@@ -4683,6 +4703,32 @@
     document.getElementById('btn-modal-close').addEventListener('click', closeModal);
     document.getElementById('btn-cancel').addEventListener('click', closeModal);
     document.getElementById('btn-save').addEventListener('click', saveConfig);
+
+    // Delete button in edit modal → show confirm modal
+    document.getElementById('btn-modal-delete').addEventListener('click', () => {
+      const cfg = configs.find(c => c.id === editingId);
+      if (!cfg) return;
+      const nameEl = document.getElementById('confirm-delete-name');
+      nameEl.textContent = `"${cfg.name}"`;
+      const bg = document.getElementById('confirm-delete-bg');
+      bg.style.display = 'flex';
+    });
+
+    document.getElementById('btn-confirm-delete-cancel').addEventListener('click', () => {
+      document.getElementById('confirm-delete-bg').style.display = 'none';
+    });
+
+    document.getElementById('btn-confirm-delete-ok').addEventListener('click', () => {
+      const cfg = configs.find(c => c.id === editingId);
+      if (!cfg) return;
+      configs = configs.filter(c => c.id !== cfg.id);
+      if (stats.cfg?.[cfg.id]) { delete stats.cfg[cfg.id]; saveStats(); }
+      if (cfgHistory[cfg.id])  { delete cfgHistory[cfg.id]; saveCfgHist(); }
+      saveCfgs();
+      document.getElementById('confirm-delete-bg').style.display = 'none';
+      closeModal();
+      recompute();
+    });
 
     document.getElementById('btn-add-col').addEventListener('click', () => {
       if (patCols.length >= MAX_PAT_COLS) { alert(`Tối đa ${MAX_PAT_COLS} cột mỗi cấu hình.`); return; }

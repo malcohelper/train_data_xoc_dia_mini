@@ -272,6 +272,24 @@ function rateClass(rate) {
 }
 
 /* ──────────────────────────────────────
+   HELPERS — PRED HISTORY UTILS
+────────────────────────────────────── */
+function chunkArr(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// Tính accuracy từ cfgPredHistory của 1 config, có thể filter theo predictType
+function predAccStats(cfgId, typeFilter) {
+  const preds = (cfgPredHistory[cfgId] || [])
+    .filter(p => !typeFilter || p.predictType === typeFilter);
+  if (!preds.length) return null;
+  const correct = preds.filter(p => p.correct).length;
+  return { correct, total: preds.length, rate: correct / preds.length };
+}
+
+/* ──────────────────────────────────────
    COLUMN HISTORY BUILDER
    Builds an array of complete columns from all rounds.
    Each column: {type, count, startIdx, endIdx}
@@ -463,7 +481,13 @@ function analyzeConfig(cfg, cols, rounds, threshold, ctxDepth, minSample) {
     //   20% trend bonus
     const stabW  = stability === 'high' ? 1.0 : stability === 'medium' ? 0.6 : stability === 'unknown' ? 0.5 : 0.2;
     const trendW = trend === 'up' ? 1.0 : trend === 'stable' ? 0.7 : trend === 'neutral' ? 0.5 : 0.2;
-    const combinedScore = wilson * 0.5 + stabW * hitRate * 0.3 + trendW * hitRate * 0.2;
+    let combinedScore = wilson * 0.5 + stabW * hitRate * 0.3 + trendW * hitRate * 0.2;
+    // Blend actual accuracy từ cfgPredHistory khi có đủ mẫu (≥5 ván)
+    const _ph = cfgPredHistory[cfg.id] || [];
+    if (_ph.length >= 5) {
+      const actualAcc = _ph.filter(p => p.correct).length / _ph.length;
+      combinedScore = combinedScore * 0.75 + actualAcc * 0.25;
+    }
 
     // shouldBet dựa trên Wilson score (không phải raw hitRate)
     const shouldBetCtx = wilson >= threshold / 100;
@@ -673,6 +697,22 @@ function buildCfgCard(cfg, res, threshold) {
         <span class="rate-pill ${rateClass(rate)}">${pct(chanCount,total)} C / ${pct(leCount,total)} L</span>
         <span class="badge ${suggestBet ? 'b-bet' : 'b-nobet'}">${suggestBet ? '🎯 BET' : '👁 Chỉ dự đoán'}</span>
         <span style="font-size:11px;color:#475569">${total} lần</span>
+        ${(() => {
+          const ph = cfgPredHistory[cfg.id] || [];
+          if (ph.length < 5) return '';
+          const correct = ph.filter(p => p.correct).length;
+          const r = correct / ph.length;
+          const col = r >= 0.65 ? '#4ade80' : r >= 0.50 ? '#fbbf24' : '#f87171';
+          const bg  = r >= 0.65 ? '#052e0f' : r >= 0.50 ? '#2d1a00' : '#2d0000';
+          const last10 = ph.slice(-10);
+          const recentR = last10.filter(p => p.correct).length / last10.length;
+          const trending = ph.length >= 15 && recentR < (r - 0.10);
+          const lowAcc   = ph.length >= 10 && r < 0.50;
+          return `<span style="background:${bg};color:${col};padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;">
+              ✓ ${Math.round(r*100)}% thực tế (${ph.length} ván)</span>`
+            + (lowAcc   ? `<span style="background:#2d0000;color:#f87171;padding:2px 5px;border-radius:4px;font-size:9px;font-weight:700;">⚠ Tỉ lệ thực thấp</span>` : '')
+            + (trending ? `<span style="background:#2d1a00;color:#fbbf24;padding:2px 5px;border-radius:4px;font-size:9px;font-weight:700;">↘ Xu hướng giảm</span>` : '');
+        })()}
         <span style="color:#475569;font-size:14px">▾</span>
       </div>
     </div>
@@ -869,10 +909,48 @@ function buildRealHistPanel(cfgId) {
 
     const rColor = r => r >= 0.70 ? '#4ade80' : r >= 0.55 ? '#fbbf24' : '#f87171';
 
+    // Trend sparkline — chia thành 8 bucket
+    const BUCKETS = 8;
+    const sorted = [...preds].sort((a,b) => a.ts - b.ts);
+    const chunks = chunkArr(sorted, Math.max(1, Math.ceil(sorted.length / BUCKETS)));
+    const bucketAcc = chunks.map(b => b.filter(p => p.correct).length / b.length);
+    const W = 120, H = 28, pad = 3;
+    const pts = bucketAcc.map((v, i) => {
+      const x = pad + (i / Math.max(1, bucketAcc.length - 1)) * (W - pad*2);
+      const y = H - pad - v * (H - pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const trendUp = bucketAcc.length >= 2 && bucketAcc[bucketAcc.length-1] > bucketAcc[0];
+    const sparkColor = trendUp ? '#4ade80' : '#f87171';
+    const sparkline = bucketAcc.length >= 3 ? `
+      <svg width="${W}" height="${H}" style="display:block;margin-bottom:6px;" viewBox="0 0 ${W} ${H}">
+        <line x1="${pad}" y1="${H/2}" x2="${W-pad}" y2="${H/2}" stroke="#1e2e42" stroke-width="1"/>
+        <polyline points="${pts}" fill="none" stroke="${sparkColor}" stroke-width="1.5" stroke-linejoin="round"/>
+        ${bucketAcc.map((v,i) => {
+          const x = pad + (i / Math.max(1, bucketAcc.length-1)) * (W-pad*2);
+          const y = H - pad - v*(H-pad*2);
+          return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${sparkColor}"/>`;
+        }).join('')}
+      </svg>` : '';
+
+    // Type-split accuracy
+    const chanPreds = preds.filter(p => p.predictType === 'chan');
+    const lePreds   = preds.filter(p => p.predictType === 'le');
+    const chanAcc   = chanPreds.length ? chanPreds.filter(p => p.correct).length / chanPreds.length : null;
+    const leAcc     = lePreds.length   ? lePreds.filter(p => p.correct).length   / lePreds.length   : null;
+    const typeRow = (chanAcc !== null || leAcc !== null) ? `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+        ${chanAcc !== null ? `<span style="font-size:10px;color:${(chanPreds.length>=5&&chanAcc<0.45)?'#f87171':'#94a3b8'}">
+          Chẵn: <b style="color:${rColor(chanAcc)}">${Math.round(chanAcc*100)}%</b> (${chanPreds.length})</span>` : ''}
+        ${leAcc !== null   ? `<span style="font-size:10px;color:${(lePreds.length>=5&&leAcc<0.45)?'#f87171':'#94a3b8'}">
+          Lẻ: <b style="color:${rColor(leAcc)}">${Math.round(leAcc*100)}%</b> (${lePreds.length})</span>` : ''}
+      </div>` : '';
+
     predSection = `
       <div style="flex:1;min-width:160px;">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#475569;
-                    font-weight:600;margin-bottom:6px;">📋 Dự đoán thực tế</div>
+                    font-weight:600;margin-bottom:4px;">📋 Dự đoán thực tế</div>
+        ${sparkline}
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <div>
             <div style="font-size:18px;font-weight:800;color:${rColor(rate)};line-height:1">
@@ -894,6 +972,7 @@ function buildRealHistPanel(cfgId) {
             <div style="font-size:10px;color:#475569">20 ván gần nhất</div>
           </div>
         </div>
+        ${typeRow}
       </div>`;
   }
 
@@ -901,6 +980,7 @@ function buildRealHistPanel(cfgId) {
   let breakSection = '';
   if (breaks.length) {
     const avgRowPct = Math.round(breaks.reduce((s,b) => s + (b.rowPct ?? 0), 0) / breaks.length);
+    const avgColPct = Math.round(breaks.reduce((s,b) => s + (b.pctBefore ?? 0), 0) / breaks.length);
     const fullMatchBreaks = breaks.filter(b => b.wasFullMatch).length;
     const fmRate = Math.round(fullMatchBreaks / breaks.length * 100);
 
@@ -935,7 +1015,13 @@ function buildRealHistPanel(cfgId) {
             <div style="font-size:18px;font-weight:800;color:${rowColor(avgRowPct)};line-height:1">
               ${avgRowPct}%
             </div>
-            <div style="font-size:10px;color:#475569">TB row đạt</div>
+            <div style="font-size:10px;color:#475569">TB hàng đạt</div>
+          </div>
+          <div>
+            <div style="font-size:18px;font-weight:800;color:${rowColor(avgColPct)};line-height:1">
+              ${avgColPct}%
+            </div>
+            <div style="font-size:10px;color:#475569">TB cột đạt</div>
           </div>
           <div>
             <div style="font-size:18px;font-weight:800;color:#a78bfa;line-height:1">${fmRate}%</div>
@@ -950,6 +1036,22 @@ function buildRealHistPanel(cfgId) {
         </div>
         <div style="font-size:10px;color:#475569;margin-bottom:3px;font-weight:600;">Phân bố theo cột:</div>
         ${colBars}
+        ${(() => {
+          const causedBreaks = breaks.filter(b => b.expected && b.actual);
+          if (causedBreaks.length < 3) return '';
+          const causeCounts = {};
+          causedBreaks.forEach(b => {
+            const key = `${b.expected.type === 'chan' ? 'Chẵn' : 'Lẻ'}→${b.actual.type === 'chan' ? 'Chẵn' : 'Lẻ'}`;
+            causeCounts[key] = (causeCounts[key] || 0) + 1;
+          });
+          const causeEntries = Object.entries(causeCounts).sort((a,b) => b[1]-a[1]);
+          const causeHtml = causeEntries.map(([k, cnt]) =>
+            `<span style="font-size:9px;background:#1e2e42;padding:1px 5px;border-radius:3px;color:#94a3b8;">
+              ${k}: <b style="color:#fcd34d">${cnt}</b></span>`
+          ).join('');
+          return `<div style="font-size:10px;color:#475569;margin-top:6px;margin-bottom:3px;font-weight:600;">Nguyên nhân gãy:</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">${causeHtml}</div>`;
+        })()}
       </div>`;
   }
 

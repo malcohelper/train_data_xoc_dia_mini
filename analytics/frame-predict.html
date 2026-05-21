@@ -1538,6 +1538,7 @@
     const TAIL_SIZE = 90;
     const API_URL = `/api/rounds.json?tail=${TAIL_SIZE}`;
     const POLL_MS = 3000;
+    const STATS_HIST_INLINE_MAX = 100;
     const MAX_COLS = 15;
     const MAX_ROWS = 6;
     const MAX_PAT_COLS = 15;   // max columns per pattern (cùng số cột tối đa với lưới frame)
@@ -1584,6 +1585,8 @@
     /** predict/bet toàn cục + cfg[id] = { correct, total, betCorrect, betTotal } theo từng cấu hình khớp lúc khóa. */
     let stats = { predict: { correct: 0, total: 0 }, bet: { correct: 0, total: 0 }, cfg: {} };
     let predHistory = [];     // [{ts, roundId, predictType, hasBet, actualType, correct}]
+    let _histDomSynced = 0;
+    let _pctDomSynced = 0;
     /** Lịch sử tỉ lệ sau mỗi ván chấm: { ts, scope:'predict'|'bet', from, to } (from=null lần đầu). */
     let pctHist = [];
     /** Lịch sử theo từng khung: { [cfgId]: [{ts, roundId, predictType, actualType, correct, hasBet}] } */
@@ -1724,8 +1727,14 @@
       pending = null;
       lastSeenId = null;
       saveStats(); saveHist(); savePctHist(); saveCfgHist(); saveBreakHist(); savePending(); saveSeen();
+      resetStatsDomSync();
       renderStats();
       recompute();
+    }
+
+    function resetStatsDomSync() {
+      _histDomSynced = 0;
+      _pctDomSynced = 0;
     }
 
     /* ──────────────────────────────────────
@@ -2216,6 +2225,7 @@
       savePending();
       saveSeen();
 
+      resetStatsDomSync();
       recompute();
       renderStats();
     }
@@ -2414,32 +2424,78 @@
   </svg>`;
     }
 
-    function renderStats() {
-      const panel = document.getElementById('stats-panel');
-      if (!panel) return;
+    function getPctHistSorted() {
+      return pctHist.slice().sort((a, b) => b.ts - a.ts);
+    }
 
-      const p = stats.predict;
-      const b = stats.bet;
+    function getHistInlineRecords() {
+      return predHistory.slice().reverse().slice(0, STATS_HIST_INLINE_MAX);
+    }
 
-      const enabledCount = configs.filter(c => c.enabled).length;
-      let pendingInfo;
-      if (pending) {
-        const vis =
-          pending.blocks && pending.blocks.length
-            ? miniPredHtmlBlocksList(pending.blocks, 'md')
-            : `<span style="color:#475569;font-size:11px;">${esc(pending.configName || '')}</span>`;
-        pendingInfo = `
-      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;color:#fbbf24;">
-        <span>⏳ Đang chờ round tiếp theo</span>
-        <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px;">${vis}</span>
-        ${pending.hasBet ? '<span style="background:#14532d;color:#4ade80;padding:2px 7px;border-radius:4px;font-size:9px;font-weight:700;">BET</span>' : '<span style="color:#64748b;font-size:10px;">Không cược</span>'}
+    function buildPctHistRowHtml(e) {
+      const scopeL = e.scope === 'predict' ? 'Dự đoán' : 'BET';
+      const scopeBg = e.scope === 'predict' ? '#1e3a5f' : '#14532d';
+      const scopeFg = e.scope === 'predict' ? '#93c5fd' : '#86efac';
+      const dCol = pctHistDeltaColor(e.from, e.to);
+      const delta = e.from == null ? '' : `<span style="color:${dCol};font-weight:700;">${e.to - e.from >= 0 ? '+' : ''}${(e.to - e.from).toFixed(1)}%</span>`;
+      return `
+    <div style="display:flex;align-items:center;gap:7px;padding:5px 10px;
+                border-bottom:1px solid #0f172a;font-size:10px;">
+      <span style="background:${scopeBg};color:${scopeFg};padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;flex-shrink:0;">${scopeL}</span>
+      <span style="color:#64748b;font-variant-numeric:tabular-nums;">${fmtPctHist(e.from)}</span>
+      <span style="color:#334155;">→</span>
+      <span style="color:#e2e8f0;font-weight:700;font-variant-numeric:tabular-nums;">${fmtPctHist(e.to)}</span>
+      ${delta}
+      <span style="color:#334155;margin-left:auto;white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+    </div>`;
+    }
+
+    function buildHistInlineRowHtml(r) {
+      const d = new Date(r.ts);
+      const timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+      const circle = (type) => {
+        const isChan = type === 'chan';
+        const bg = isChan ? '#e2e8f0' : '#dc2626';
+        const fg = isChan ? '#0f172a' : '#fff';
+        const label = isChan ? 'C' : 'L';
+        return `<div style="width:28px;height:28px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:${fg};flex-shrink:0;">${label}</div>`;
+      };
+      const diceDots = r.actualReds != null
+        ? Array.from({ length: 4 }, (_, i) => {
+            const isRed = i < r.actualReds;
+            return `<div style="width:14px;height:14px;border-radius:50%;background:${isRed ? '#dc2626' : '#ffffff'};border:1.5px solid ${isRed ? '#991b1b' : '#94a3b8'};"></div>`;
+          }).join('')
+        : '';
+      const tickIcon = r.correct ? '✅' : '❌';
+      const bpBadge = r.hasBet
+        ? `<span style="background:#14532d;color:#4ade80;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">B</span>`
+        : `<span style="background:#1c1007;color:#d97706;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">P</span>`;
+      const cardBg = r.correct ? '#051209' : '#0d0404';
+      const cardBorder = r.correct ? '#0f2d18' : '#2d0f0f';
+      const firstCfgId = r.cfgIds?.[0];
+      const clickable = firstCfgId ? 'cursor:pointer;' : '';
+      const onclick = firstCfgId ? `onclick="openModal('${firstCfgId}')"` : '';
+      const hoverStyle = firstCfgId ? `onmouseover="this.style.borderColor='#475569'" onmouseout="this.style.borderColor='${cardBorder}'"` : '';
+      return `<div style="background:${cardBg};border:1px solid ${cardBorder};border-radius:8px;padding:9px 11px;margin-bottom:5px;${clickable}" ${onclick} ${hoverStyle}>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          ${circle(r.predictType)}
+          <span style="color:#475569;font-size:12px;">→</span>
+          ${circle(r.actualType)}
+          <div style="width:1px;height:20px;background:#1e2e42;flex-shrink:0;margin:0 2px;"></div>
+          ${diceDots ? `<div style="display:flex;align-items:center;gap:4px;">${diceDots}</div>` : ''}
+          <span style="flex:1;"></span>
+          <span style="font-size:15px;">${tickIcon}</span>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
+          <span style="font-size:10px;color:#f8fafc;">${timeStr} · ${dateStr}</span>
+          ${r.cfgNames ? `<span style="font-size:11px;font-weight:700;color:#f8fafc;flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.cfgNames)}">${esc(r.cfgNames)}</span>` : ''}
+          ${bpBadge}
+        </div>
       </div>`;
-      } else {
-        pendingInfo = `<span style="color:#334155;">${enabledCount ? 'Không có cấu hình nào khớp frame hiện tại' : 'Chưa có cấu hình nào được bật'}</span>`;
-      }
+    }
 
-      // Lịch sử rows
-      const histRows = predHistory.slice().reverse().map(r => {
+    function buildHistSidebarCardHtml(r) {
         const _d = new Date(r.ts);
         const time = _d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
         const blocks = r.blocks && r.blocks.length ? r.blocks : null;
@@ -2540,35 +2596,141 @@
     <div style="border:1px solid ${cardBorderColor};border-radius:8px;margin:0 8px 10px;overflow:hidden;font-size:11px;">
       ${header}${bodyHtml}${footer}
     </div>`;
-      }).join('');
+    }
 
-      // Pct hist rows
-      const pctRows = pctHist.slice().sort((a, b) => b.ts - a.ts).slice(0, 40).map(e => {
-        const scopeL = e.scope === 'predict' ? 'Dự đoán' : 'BET';
-        const scopeBg = e.scope === 'predict' ? '#1e3a5f' : '#14532d';
-        const scopeFg = e.scope === 'predict' ? '#93c5fd' : '#86efac';
-        const dCol = pctHistDeltaColor(e.from, e.to);
-        const delta = e.from == null ? '' : `<span style="color:${dCol};font-weight:700;">${e.to - e.from >= 0 ? '+' : ''}${(e.to - e.from).toFixed(1)}%</span>`;
-        return `
-    <div style="display:flex;align-items:center;gap:7px;padding:5px 10px;
-                border-bottom:1px solid #0f172a;font-size:10px;">
-      <span style="background:${scopeBg};color:${scopeFg};padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;flex-shrink:0;">${scopeL}</span>
-      <span style="color:#64748b;font-variant-numeric:tabular-nums;">${fmtPctHist(e.from)}</span>
-      <span style="color:#334155;">→</span>
-      <span style="color:#e2e8f0;font-weight:700;font-variant-numeric:tabular-nums;">${fmtPctHist(e.to)}</span>
-      ${delta}
-      <span style="color:#334155;margin-left:auto;white-space:nowrap;">${new Date(e.ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-    </div>`;
-      }).join('');
+    function buildHistSidebarRowsHtml() {
+      return predHistory.slice().reverse().map(r => buildHistSidebarCardHtml(r)).join('');
+    }
 
+    function rebuildStatsPctListDom() {
+      const el = document.getElementById('stats-pct-scroll');
+      if (!el) return;
+      const sorted = getPctHistSorted();
+      el.innerHTML = sorted.length ? sorted.map(buildPctHistRowHtml).join('') : '';
+      _pctDomSynced = pctHist.length;
+    }
+
+    function rebuildStatsHistListDom() {
+      const el = document.getElementById('stats-hist-inline-scroll');
+      if (!el) return;
+      const rows = getHistInlineRecords();
+      el.innerHTML = rows.length ? rows.map(buildHistInlineRowHtml).join('') : '';
+      _histDomSynced = predHistory.length;
+    }
+
+    function syncStatsPctList() {
+      const el = document.getElementById('stats-pct-scroll');
+      if (!el) return;
+      if (pctHist.length < _pctDomSynced || (_pctDomSynced === 0 && pctHist.length > 0)) {
+        rebuildStatsPctListDom();
+        return;
+      }
+      if (pctHist.length === _pctDomSynced) return;
+      for (let i = pctHist.length - 1; i >= _pctDomSynced; i--) {
+        el.insertAdjacentHTML('afterbegin', buildPctHistRowHtml(pctHist[i]));
+      }
+      _pctDomSynced = pctHist.length;
+    }
+
+    function syncStatsHistList() {
+      const el = document.getElementById('stats-hist-inline-scroll');
+      if (!el) return;
+      if (predHistory.length < _histDomSynced || (_histDomSynced === 0 && predHistory.length > 0)) {
+        rebuildStatsHistListDom();
+        return;
+      }
+      if (predHistory.length === _histDomSynced) return;
+      for (let i = predHistory.length - 1; i >= _histDomSynced; i--) {
+        el.insertAdjacentHTML('afterbegin', buildHistInlineRowHtml(predHistory[i]));
+      }
+      _histDomSynced = predHistory.length;
+      while (el.children.length > STATS_HIST_INLINE_MAX) {
+        el.removeChild(el.lastChild);
+      }
+    }
+
+    function updateStatsListHeaders() {
+      const pctEmpty = document.getElementById('stats-pct-empty');
+      const pctBox = document.getElementById('stats-pct-box');
+      if (pctEmpty && pctBox) {
+        const has = pctHist.length > 0;
+        pctEmpty.style.display = has ? 'none' : 'block';
+        pctBox.style.display = has ? 'block' : 'none';
+      }
+      const pctCount = document.getElementById('stats-pct-count');
+      if (pctCount) pctCount.textContent = pctHist.length ? String(pctHist.length) : '';
+      const histLbl = document.getElementById('stats-hist-inline-label');
+      if (histLbl) {
+        const n = predHistory.length;
+        const shown = Math.min(n, STATS_HIST_INLINE_MAX);
+        histLbl.textContent = n
+          ? `Lịch sử · ${shown}${n > shown ? `/${n}` : ''}`
+          : 'Lịch sử';
+      }
+      const histEmpty = document.getElementById('stats-hist-inline-empty');
+      const histScroll = document.getElementById('stats-hist-inline-scroll');
+      if (histEmpty && histScroll) {
+        const has = predHistory.length > 0;
+        histEmpty.style.display = has ? 'none' : 'block';
+        histScroll.style.display = has ? 'block' : 'none';
+      }
+    }
+
+    function ensureStatsPanelShell() {
+      const panel = document.getElementById('stats-panel');
+      if (!panel || document.getElementById('stats-panel-lists')) return;
       panel.innerHTML = `
+    <div id="stats-panel-dynamic"></div>
+    <div id="stats-panel-lists" style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;align-items:start;">
+      <div>
+        <div id="stats-pct-empty" style="font-size:11px;color:#2d3f55;padding:4px 0;">Chưa có bước nào.</div>
+        <div id="stats-pct-box" style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;overflow:hidden;display:none;">
+          <div style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+                      color:#475569;border-bottom:1px solid #1e2e42;display:flex;justify-content:space-between;">
+            <span>Các bước gần nhất<span id="stats-pct-count" style="color:#334155;font-weight:400;margin-left:4px;"></span></span>
+            <span style="color:#334155;">mới → cũ</span>
+          </div>
+          <div id="stats-pct-scroll" style="max-height:320px;overflow-y:auto;"></div>
+        </div>
+      </div>
+      <div style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;overflow:hidden;">
+        <div style="padding:5px 10px;border-bottom:1px solid #1e2e42;display:flex;align-items:center;justify-content:space-between;">
+          <span id="stats-hist-inline-label" style="font-size:9px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.05em;">Lịch sử</span>
+          <button type="button" onclick="toggleHistSidebar()" style="background:none;border:none;cursor:pointer;color:#334155;font-size:9px;padding:0;line-height:1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#334155'">Chi tiết →</button>
+        </div>
+        <div id="stats-hist-inline-empty" style="padding:12px 10px;font-size:10px;color:#2d3f55;">Chưa có lịch sử.</div>
+        <div id="stats-hist-inline-scroll" style="max-height:320px;overflow-y:auto;padding:6px;display:none;"></div>
+      </div>
+    </div>`;
+      resetStatsDomSync();
+    }
 
-    <!-- ── TRÊN: Số liệu + Sparkline + Trạng thái ── -->
+    function updateStatsPanelDynamic() {
+      const dyn = document.getElementById('stats-panel-dynamic');
+      if (!dyn) return;
+      const p = stats.predict;
+      const b = stats.bet;
+      const enabledCount = configs.filter(c => c.enabled).length;
+      let pendingInfo;
+      if (pending) {
+        const vis =
+          pending.blocks && pending.blocks.length
+            ? miniPredHtmlBlocksList(pending.blocks, 'md')
+            : `<span style="color:#475569;font-size:11px;">${esc(pending.configName || '')}</span>`;
+        pendingInfo = `
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;color:#fbbf24;">
+        <span>⏳ Đang chờ round tiếp theo</span>
+        <span style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px;">${vis}</span>
+        ${pending.hasBet ? '<span style="background:#14532d;color:#4ade80;padding:2px 7px;border-radius:4px;font-size:9px;font-weight:700;">BET</span>' : '<span style="color:#64748b;font-size:10px;">Không cược</span>'}
+      </div>`;
+      } else {
+        pendingInfo = `<span style="color:#334155;">${enabledCount ? 'Không có cấu hình nào khớp frame hiện tại' : 'Chưa có cấu hình nào được bật'}</span>`;
+      }
+      dyn.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
       ${statBox('Dự đoán (tất cả)', p.correct, p.total)}
       ${statBox('Cá cược (BET)', b.correct, b.total)}
     </div>
-
     ${pctHist.length ? `
     <div style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;padding:10px 12px;margin-bottom:10px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -2586,93 +2748,18 @@
         </div>
       </div>
     </div>` : ''}
+    <div style="font-size:11px;margin-bottom:10px;">${pendingInfo}</div>`;
+    }
 
-    <div style="font-size:11px;margin-bottom:10px;">${pendingInfo}</div>
-
-    <!-- ── DƯỚI: pct steps + inline history ── -->
-    <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:10px;align-items:start;">
-
-      <div>
-        ${pctHist.length ? `
-        <div style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;overflow:hidden;">
-          <div style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;
-                      color:#475569;border-bottom:1px solid #1e2e42;display:flex;justify-content:space-between;">
-            <span>Các bước gần nhất</span>
-            <span style="color:#334155;">mới → cũ</span>
-          </div>
-          <div style="max-height:320px;overflow-y:auto;">${pctRows}</div>
-        </div>` : `
-        <div style="font-size:11px;color:#2d3f55;padding:4px 0;">Chưa có bước nào.</div>`}
-      </div>
-
-      <!-- Inline history list -->
-      <div style="background:#0f172a;border:1px solid #1e2e42;border-radius:8px;overflow:hidden;">
-        <div style="padding:5px 10px;border-bottom:1px solid #1e2e42;display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:9px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.05em;">Lịch sử${predHistory.length ? ` · ${predHistory.length}` : ''}</span>
-          <button onclick="toggleHistSidebar()" style="background:none;border:none;cursor:pointer;color:#334155;font-size:9px;padding:0;line-height:1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#334155'">Chi tiết →</button>
-        </div>
-        ${predHistory.length ? `
-        <div style="max-height:320px;overflow-y:auto;padding:6px;">
-          ${predHistory.slice().reverse().slice(0, 30).map(r => {
-            const d = new Date(r.ts);
-            const timeStr = d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-            const dateStr = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
-
-            // Circle builder
-            const circle = (type) => {
-              const isChan = type === 'chan';
-              const bg = isChan ? '#e2e8f0' : '#dc2626';
-              const fg = isChan ? '#0f172a' : '#fff';
-              const label = isChan ? 'C' : 'L';
-              return `<div style="width:28px;height:28px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:${fg};flex-shrink:0;">${label}</div>`;
-            };
-
-            // Dice dots row
-            const diceDots = r.actualReds != null
-              ? Array.from({length: 4}, (_, i) => {
-                  const isRed = i < r.actualReds;
-                  return `<div style="width:14px;height:14px;border-radius:50%;background:${isRed ? '#dc2626' : '#ffffff'};border:1.5px solid ${isRed ? '#991b1b' : '#94a3b8'};"></div>`;
-                }).join('')
-              : '';
-
-            const tickIcon = r.correct ? '✅' : '❌';
-            const bpBadge = r.hasBet
-              ? `<span style="background:#14532d;color:#4ade80;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">B</span>`
-              : `<span style="background:#1c1007;color:#d97706;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;">P</span>`;
-            const cardBg = r.correct ? '#051209' : '#0d0404';
-            const cardBorder = r.correct ? '#0f2d18' : '#2d0f0f';
-            const firstCfgId = r.cfgIds?.[0];
-            const clickable = firstCfgId ? `cursor:pointer;` : '';
-            const onclick = firstCfgId ? `onclick="openModal('${firstCfgId}')"` : '';
-            const hoverStyle = firstCfgId ? `onmouseover="this.style.borderColor='#475569'" onmouseout="this.style.borderColor='${cardBorder}'"` : '';
-
-            return `<div style="background:${cardBg};border:1px solid ${cardBorder};border-radius:8px;padding:9px 11px;margin-bottom:5px;${clickable}" ${onclick} ${hoverStyle}>
-              <!-- Line 1: circles | dots + tick -->
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-                ${circle(r.predictType)}
-                <span style="color:#475569;font-size:12px;">→</span>
-                ${circle(r.actualType)}
-                <div style="width:1px;height:20px;background:#1e2e42;flex-shrink:0;margin:0 2px;"></div>
-                ${diceDots ? `<div style="display:flex;align-items:center;gap:4px;">${diceDots}</div>` : ''}
-                <span style="flex:1;"></span>
-                <span style="font-size:15px;">${tickIcon}</span>
-              </div>
-              <!-- Line 2: time + B/P + cfg name hint -->
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
-                <span style="font-size:10px;color:#334155;">${timeStr} · ${dateStr}</span>
-                ${r.cfgNames ? `<span style="font-size:9px;color:#1e3a5f;flex:1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.cfgNames}</span>` : ''}
-                ${bpBadge}
-              </div>
-            </div>`;
-          }).join('')}
-        </div>` : `<div style="padding:12px 10px;font-size:10px;color:#2d3f55;">Chưa có lịch sử.</div>`}
-      </div>
-
-    </div>
-  `;
-
-      renderHistSidebar(histRows);
-
+    function renderStats() {
+      const panel = document.getElementById('stats-panel');
+      if (!panel) return;
+      ensureStatsPanelShell();
+      updateStatsPanelDynamic();
+      syncStatsPctList();
+      syncStatsHistList();
+      updateStatsListHeaders();
+      renderHistSidebar(buildHistSidebarRowsHtml());
     }
 
     /** Render danh sách tiền cảnh đã pin cho 1 config trong list. */

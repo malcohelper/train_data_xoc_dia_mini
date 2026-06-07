@@ -1400,7 +1400,14 @@ function saveCfgsToLS() {
 }
 
 function exportConfigs() {
-  const blob = new Blob([JSON.stringify(configs, null, 2)], { type: 'application/json' });
+  const payload = {
+    version: '2',
+    exportedAt: new Date().toISOString(),
+    configs,
+    cfgPredHistory,
+    cfgBreakHistory,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
@@ -1522,22 +1529,22 @@ function loadConfigsFromFile(file) {
   reader.onload = e => {
     try {
       const raw = JSON.parse(e.target.result);
-      if (raw && raw.version === '2') {
-        configs         = (raw.configs || []).filter(c => c.id && c.pattern);
-        cfgPredHistory  = raw.cfgPredHistory  || {};
-        cfgBreakHistory = raw.cfgBreakHistory || {};
-        const pCount = Object.keys(cfgPredHistory).length;
-        const bCount = Object.keys(cfgBreakHistory).length;
-        document.getElementById('cfg-info').textContent =
-          `✅ ${configs.length} configs · ${pCount} pred hist · ${bCount} break hist`;
-      } else if (Array.isArray(raw)) {
-        configs = raw.filter(c => c.id && c.pattern);
-        cfgPredHistory  = {};
-        cfgBreakHistory = {};
-        document.getElementById('cfg-info').textContent = `✅ ${configs.length} configs từ file (v1)`;
-      } else {
-        alert('File JSON không hợp lệ'); return;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.configs)) {
+        alert('File JSON không hợp lệ (cần object export có configs, cfgPredHistory, cfgBreakHistory)');
+        return;
       }
+
+      configs = raw.configs.filter(c => c.id && c.name && Array.isArray(c.pattern) && c.predictType);
+      cfgPredHistory = raw.cfgPredHistory && typeof raw.cfgPredHistory === 'object' && !Array.isArray(raw.cfgPredHistory)
+        ? raw.cfgPredHistory
+        : {};
+      cfgBreakHistory = raw.cfgBreakHistory && typeof raw.cfgBreakHistory === 'object' && !Array.isArray(raw.cfgBreakHistory)
+        ? raw.cfgBreakHistory
+        : {};
+      const pCount = Object.keys(cfgPredHistory).length;
+      const bCount = Object.keys(cfgBreakHistory).length;
+      document.getElementById('cfg-info').textContent =
+        `✅ ${configs.length} configs · ${pCount} pred hist · ${bCount} break hist`;
       checkReady();
     } catch (err) { alert('Lỗi đọc file: ' + err.message); }
   };

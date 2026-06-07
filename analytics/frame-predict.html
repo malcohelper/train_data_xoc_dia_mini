@@ -4479,13 +4479,17 @@
       const reader = new FileReader();
       reader.onload = e => {
         try {
-          const data = JSON.parse(e.target.result);
-          if (!Array.isArray(data)) { alert('File không hợp lệ (cần JSON array).'); return; }
+          const raw = JSON.parse(e.target.result);
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.configs)) {
+            alert('File không hợp lệ (cần object export có configs, cfgPredHistory, cfgBreakHistory).');
+            return;
+          }
+          const data = raw.configs;
           const valid = data.filter(c => c.id && c.name && Array.isArray(c.pattern) && c.predictType);
           if (!valid.length) { alert('Không tìm thấy cấu hình hợp lệ trong file.'); return; }
 
           const existMap = new Map(configs.map(c => [c.id, c]));
-          let added = 0, updated = 0;
+          let added = 0, updated = 0, predHistImported = 0, breakHistImported = 0;
 
           for (const c of valid) {
             // enabled: lấy từ file nếu có, nếu không thì mặc định true
@@ -4497,12 +4501,37 @@
               updated++;
             } else {
               configs.push({ ...c, enabled: enabledVal });
+              existMap.set(c.id, c);
               added++;
             }
           }
 
-          saveCfgs(); recompute();
-          alert(`Import xong:\n• ${added} cấu hình mới thêm\n• ${updated} cấu hình đã cập nhật (bao gồm trạng thái bật/tắt)`);
+          const validIds = new Set(valid.map(c => c.id));
+          const importedPredHist = raw.cfgPredHistory || {};
+          if (importedPredHist && typeof importedPredHist === 'object' && !Array.isArray(importedPredHist)) {
+            for (const [cfgId, hist] of Object.entries(importedPredHist)) {
+              if (validIds.has(cfgId) && Array.isArray(hist)) {
+                cfgHistory[cfgId] = hist;
+                predHistImported++;
+              }
+            }
+          }
+
+          const importedBreakHist = raw.cfgBreakHistory || {};
+          if (importedBreakHist && typeof importedBreakHist === 'object' && !Array.isArray(importedBreakHist)) {
+            for (const [cfgId, hist] of Object.entries(importedBreakHist)) {
+              if (validIds.has(cfgId) && Array.isArray(hist)) {
+                cfgBreakHistory[cfgId] = hist;
+                breakHistImported++;
+              }
+            }
+          }
+
+          saveCfgs();
+          saveCfgHist();
+          saveBreakHist();
+          recompute();
+          alert(`Import xong:\n• ${added} cấu hình mới thêm\n• ${updated} cấu hình đã cập nhật (bao gồm trạng thái bật/tắt)\n• ${predHistImported} lịch sử dự đoán theo khung\n• ${breakHistImported} lịch sử điểm gãy`);
         } catch (err) {
           alert('Lỗi đọc file: ' + err.message);
         }

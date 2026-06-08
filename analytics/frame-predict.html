@@ -862,6 +862,65 @@
       flex-wrap: wrap;
     }
 
+    #prectx-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .prectx-card {
+      background: #120f24;
+      border: 1px solid #3b2a66;
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+
+    .prectx-card-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 10px;
+      color: #a78bfa;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .prectx-cols {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+
+    .prectx-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .prectx-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding-top: 7px;
+      border-top: 1px solid rgba(167, 139, 250, .18);
+    }
+
+    .prectx-empty {
+      background: #0f172a;
+      border: 1px dashed #334155;
+      border-radius: 8px;
+      color: #475569;
+      font-size: 11px;
+      padding: 9px 10px;
+    }
+
     .pat-col-card {
       background: #0f172a;
       border: 1px solid #2d3f55;
@@ -1426,6 +1485,15 @@
         </div>
 
         <div class="form-row">
+          <span class="form-lbl">Tiền cảnh trước khung <span style="text-transform:none;font-weight:400;letter-spacing:0;">(tuỳ chọn, khớp thì ưu tiên dự đoán riêng)</span></span>
+          <div id="prectx-list"></div>
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+            <button class="btn-secondary btn-sm" id="btn-add-prectx">＋ Thêm tiền cảnh</button>
+            <button class="btn-secondary btn-sm" id="btn-prectx-from-frame">Lấy từ frame hiện tại</button>
+          </div>
+        </div>
+
+        <div class="form-row">
           <span class="form-lbl">Xem trước</span>
           <div id="pat-preview"></div>
         </div>
@@ -1491,6 +1559,17 @@
       <button onclick="exitQuickAdd()" style="background:none;border:none;color:#475569;cursor:pointer;font-size:15px;padding:0;line-height:1;">✕</button>
     </div>
     <div id="qa-preview" style="margin-bottom:10px;min-height:20px;"></div>
+    <div id="qa-ctx-wrap" style="margin-bottom:10px;padding:8px;border:1px solid #2d214f;border-radius:8px;background:#120f24;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+        <span style="font-size:10px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">Tiền cảnh</span>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <button id="qa-ctx-minus" onclick="setQACtxDelta(-1)" style="width:22px;height:22px;padding:0;border-radius:5px;background:#2d3f55;color:#e2e8f0;font-weight:700;">−</button>
+          <span id="qa-ctx-val" style="min-width:44px;text-align:center;font-size:11px;color:#e2e8f0;font-weight:700;">0 cột</span>
+          <button id="qa-ctx-plus" onclick="setQACtxDelta(1)" style="width:22px;height:22px;padding:0;border-radius:5px;background:#2d3f55;color:#e2e8f0;font-weight:700;">+</button>
+        </div>
+      </div>
+      <div id="qa-ctx-preview" style="min-height:16px;font-size:10px;color:#475569;">Không dùng tiền cảnh</div>
+    </div>
     <div style="margin-bottom:8px;">
       <div style="font-size:10px;color:#475569;margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Dự đoán</div>
       <div style="display:flex;gap:6px;">
@@ -1554,6 +1633,52 @@
       return cycle[(idx + 1) % cycle.length];
     }
 
+    function clampRows(v) {
+      return Math.max(1, Math.min(MAX_ROWS, parseInt(String(v), 10) || 1));
+    }
+
+    function normalizeCtxCol(col) {
+      if (!col || (col.type !== 'chan' && col.type !== 'le')) return null;
+      return { type: col.type, rows: clampRows(col.rows ?? col.count) };
+    }
+
+    function cloneCtxCols(cols) {
+      return (Array.isArray(cols) ? cols : [])
+        .map(normalizeCtxCol)
+        .filter(Boolean);
+    }
+
+    function preCtxKey(cols) {
+      return cloneCtxCols(cols).map(c => `${c.rows}${c.type[0]}`).join('|');
+    }
+
+    function clonePreContext(ctx, fallbackPred = 'chan', fallbackBet = true) {
+      const cols = cloneCtxCols(ctx?.cols);
+      if (!cols.length) return null;
+      const out = {
+        key: ctx?.key || preCtxKey(cols),
+        cols,
+        predictType: ctx?.predictType === 'le' ? 'le' : ctx?.predictType === 'chan' ? 'chan' : fallbackPred,
+        shouldBet: typeof ctx?.shouldBet === 'boolean' ? ctx.shouldBet : fallbackBet,
+      };
+      if (Number.isFinite(ctx?.hitRate)) out.hitRate = ctx.hitRate;
+      if (Number.isFinite(ctx?.count)) out.count = ctx.count;
+      if (ctx?.source) out.source = ctx.source;
+      return out;
+    }
+
+    function normalizePreContexts(list, fallbackPred = 'chan', fallbackBet = true) {
+      const map = new Map();
+      for (const raw of Array.isArray(list) ? list : []) {
+        const ctx = clonePreContext(raw, fallbackPred, fallbackBet);
+        if (!ctx) continue;
+        ctx.key = preCtxKey(ctx.cols);
+        if (!ctx.key || map.has(ctx.key)) continue;
+        map.set(ctx.key, ctx);
+      }
+      return [...map.values()];
+    }
+
     /* ──────────────────────────────────────
        STATE
     ────────────────────────────────────── */
@@ -1573,9 +1698,11 @@
     let qaSelFi        = { start: -1, end: -1 };
     let qaPredType     = 'chan';
     let qaShouldBet    = true;
+    let qaCtxCount     = 0;
     let totalRounds = 0;
     let editingId = null;
     let patCols = [];
+    let preCtxEdits = [];
     let pollTimer = null;
     let cfgFilter = 'all';  // 'all' | 'bet' | 'predict' | 'off'
 
@@ -3417,6 +3544,7 @@
       document.getElementById('btn-quick-add').classList.add('qa-active');
       document.getElementById('frame-col-nums').classList.add('qa-mode');
       qaSelFi = { start: -1, end: -1 };
+      qaCtxCount = 0;
       document.getElementById('quick-add-panel').classList.remove('visible');
     }
 
@@ -3424,6 +3552,7 @@
       _qaDragging = false;
       _qaStartFi = _qaEndFi = -1;
       qaSelFi = { start: -1, end: -1 };
+      qaCtxCount = 0;
       document.getElementById('quick-add-panel').classList.remove('visible');
       updateQAHighlight(-1, -1);
     }
@@ -3468,23 +3597,64 @@
       panel.classList.add('visible');
     }
 
+    function qaMaxContextCount() {
+      const { start, end } = qaSelFi;
+      if (start < 0 || end < start) return 0;
+      const patLen = end - start + 1;
+      return Math.max(0, Math.min(start, MAX_PAT_COLS - patLen));
+    }
+
+    function qaCtxCols() {
+      const { start } = qaSelFi;
+      if (qaCtxCount <= 0 || start <= 0) return [];
+      return frame.slice(start - qaCtxCount, start).map(c => ({ type: c.type, rows: c.count }));
+    }
+
+    function setQACtxDelta(delta) {
+      const max = qaMaxContextCount();
+      qaCtxCount = Math.max(0, Math.min(max, qaCtxCount + delta));
+      renderQAPanel();
+    }
+
+    function quickColsPreview(cols, emptyText) {
+      if (!cols.length) return `<span style="color:#475569">${emptyText}</span>`;
+      return `<div style="display:flex;gap:5px;align-items:flex-start;flex-wrap:wrap;">${cols.map(col => {
+        const bg = col.type === 'chan' ? '#f1f5f9' : '#dc2626';
+        const fg = col.type === 'chan' ? '#0f172a' : '#fff';
+        const lbl = col.type === 'chan' ? 'C' : 'L';
+        const cells = Array.from({ length: Math.min(col.rows ?? col.count, MAX_ROWS) }, () =>
+          `<div style="width:18px;height:18px;border-radius:50%;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">${lbl}</div>`
+        ).join('');
+        return `<div style="display:flex;flex-direction:column;gap:2px;align-items:center;">${cells}</div>`;
+      }).join('')}</div>`;
+    }
+
     function renderQAPanel() {
       const { start, end } = qaSelFi;
-      let previewHtml = '';
-      for (let fi = start; fi <= end && fi < frame.length; fi++) {
-        const col = frame[fi];
-        const bg  = col.type === 'chan' ? '#f1f5f9' : '#dc2626';
-        const fg  = col.type === 'chan' ? '#0f172a' : '#fff';
-        let cells = '';
-        for (let r = 0; r < col.count; r++) {
-          const v = col.reds ? col.reds[r] : null;
-          const lbl = v != null ? String(v) : (col.type === 'chan' ? 'C' : 'L');
-          cells += `<div style="width:18px;height:18px;border-radius:50%;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">${lbl}</div>`;
+      let previewCols = [];
+      if (start >= 0 && end >= start) {
+        for (let fi = start; fi <= end && fi < frame.length; fi++) {
+          const col = frame[fi];
+          if (col) previewCols.push({ type: col.type, rows: col.count });
         }
-        previewHtml += `<div style="display:flex;flex-direction:column;gap:2px;align-items:center;">${cells}</div>`;
       }
       document.getElementById('qa-preview').innerHTML =
-        `<div style="display:flex;gap:5px;align-items:flex-start;flex-wrap:wrap;">${previewHtml}</div>`;
+        quickColsPreview(previewCols, 'Chưa chọn khung');
+
+      const maxCtx = qaMaxContextCount();
+      if (qaCtxCount > maxCtx) qaCtxCount = maxCtx;
+      const ctxMinus = document.getElementById('qa-ctx-minus');
+      const ctxPlus = document.getElementById('qa-ctx-plus');
+      const ctxVal = document.getElementById('qa-ctx-val');
+      const ctxPreview = document.getElementById('qa-ctx-preview');
+      if (ctxMinus && ctxPlus && ctxVal && ctxPreview) {
+        ctxMinus.disabled = qaCtxCount <= 0;
+        ctxPlus.disabled = qaCtxCount >= maxCtx;
+        ctxMinus.style.opacity = ctxMinus.disabled ? '.35' : '1';
+        ctxPlus.style.opacity = ctxPlus.disabled ? '.35' : '1';
+        ctxVal.textContent = `${qaCtxCount}/${maxCtx} cột`;
+        ctxPreview.innerHTML = quickColsPreview(qaCtxCols(), maxCtx ? 'Không dùng tiền cảnh' : 'Không có cột nào trước vùng chọn');
+      }
 
       const chanActive = qaPredType === 'chan';
       const bc = document.getElementById('qa-btn-chan');
@@ -3514,8 +3684,11 @@
       if (!patCols.length) { exitQuickAdd(); return; }
       const predType   = qaPredType;
       const shouldBet  = qaShouldBet;
+      const preContexts = qaCtxCount > 0
+        ? [{ cols: qaCtxCols(), predictType: predType, shouldBet, source: 'quick-add' }]
+        : [];
       exitQuickAdd();
-      openModal(null, { predictType: predType, shouldBet });
+      openModal(null, { predictType: predType, shouldBet, preContexts });
     }
 
     // Mouse events — attach after DOM ready (see bottom of script)
@@ -3530,6 +3703,7 @@
         _qaDragging = true;
         _qaStartFi  = fi;
         _qaEndFi    = fi;
+        qaCtxCount  = 0;
         updateQAHighlight(fi, fi);
         document.getElementById('quick-add-panel').classList.remove('visible');
       });
@@ -3997,6 +4171,7 @@
         document.querySelector(`input[name="r-pred"][value="${cfg.predictType}"]`).checked = true;
         document.querySelector(`input[name="r-bet"][value="${cfg.shouldBet ? 'bet' : 'nobet'}"]`).checked = true;
         patCols = cfg.pattern.map(p => ({ type: p.type, rows: p.rows, reds: p.reds ? [...p.reds] : [] }));
+        preCtxEdits = normalizePreContexts(cfg.preContexts, cfg.predictType, cfg.shouldBet);
         renderModalCfgHist(editingId);
       } else {
         document.getElementById('inp-name').value = '';
@@ -4006,6 +4181,7 @@
         document.querySelector(`input[name="r-pred"][value="${predType}"]`).checked = true;
         document.querySelector(`input[name="r-bet"][value="${bet ? 'bet' : 'nobet'}"]`).checked = true;
         if (!patCols.length) patCols = [{ type: 'chan', rows: 2 }, { type: 'le', rows: 2 }];
+        preCtxEdits = normalizePreContexts(defaults.preContexts, predType, bet);
         document.getElementById('modal-cfg-hist').classList.remove('visible');
       }
 
@@ -4191,11 +4367,219 @@
       document.getElementById('modal-cfg-hist').classList.remove('visible');
       editingId = null;
       patCols = [];
+      preCtxEdits = [];
     }
 
     /* ──────────────────────────────────────
        MODAL — PATTERN EDITOR
     ────────────────────────────────────── */
+    function currentModalPredType() {
+      return document.querySelector('input[name="r-pred"]:checked')?.value || 'chan';
+    }
+
+    function currentModalShouldBet() {
+      return document.querySelector('input[name="r-bet"]:checked')?.value === 'bet';
+    }
+
+    function miniColsHtml(cols, dim = 18) {
+      return cloneCtxCols(cols).map(col => {
+        const bg = col.type === 'chan' ? '#f1f5f9' : '#dc2626';
+        const fg = col.type === 'chan' ? '#0f172a' : '#fff';
+        const lbl = col.type === 'chan' ? 'C' : 'L';
+        const cells = Array.from({ length: Math.min(col.rows, MAX_ROWS) }, () =>
+          `<div style="width:${dim}px;height:${dim}px;border-radius:50%;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;margin-bottom:1px;">${lbl}</div>`
+        ).join('');
+        return `<div style="display:flex;flex-direction:column;">${cells}</div>`;
+      }).join('');
+    }
+
+    function renderPreCtxEditor() {
+      const container = document.getElementById('prectx-list');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (!preCtxEdits.length) {
+        container.innerHTML = '<div class="prectx-empty">Chưa chọn tiền cảnh. Pattern gốc vẫn khớp bình thường; nếu thêm tiền cảnh và nó khớp, dự đoán riêng của tiền cảnh sẽ được ưu tiên.</div>';
+        return;
+      }
+
+      preCtxEdits.forEach((ctx, i) => {
+        const card = document.createElement('div');
+        card.className = 'prectx-card';
+
+        const hdr = document.createElement('div');
+        hdr.className = 'prectx-card-hdr';
+        hdr.innerHTML = `<span>Tiền cảnh ${i + 1}</span>`;
+        const remove = document.createElement('button');
+        remove.className = 'btn-ghost';
+        remove.style.cssText = 'color:#f87171;font-size:11px;padding:2px 6px;';
+        remove.textContent = 'Xóa';
+        remove.addEventListener('click', () => {
+          preCtxEdits.splice(i, 1);
+          renderPreCtxEditor();
+        });
+        hdr.appendChild(remove);
+        card.appendChild(hdr);
+
+        const colsWrap = document.createElement('div');
+        colsWrap.className = 'prectx-cols';
+        ctx.cols.forEach((col, ci) => {
+          const colCard = document.createElement('div');
+          colCard.className = 'pat-col-card';
+          colCard.style.borderColor = '#3b2a66';
+
+          const title = document.createElement('div');
+          title.className = 'pat-col-title';
+          title.textContent = `Cột ${ci + 1}`;
+          colCard.appendChild(title);
+
+          const typeRow = document.createElement('div');
+          typeRow.className = 'type-row';
+          ['chan', 'le'].forEach(t => {
+            const btn = document.createElement('button');
+            btn.className = `tbtn${col.type === t ? (t === 'chan' ? ' sel-c' : ' sel-l') : ''}`;
+            btn.textContent = t === 'chan' ? 'C' : 'L';
+            btn.addEventListener('click', () => {
+              preCtxEdits[i].cols[ci].type = t;
+              renderPreCtxEditor();
+            });
+            typeRow.appendChild(btn);
+          });
+          colCard.appendChild(typeRow);
+
+          const rowsRow = document.createElement('div');
+          rowsRow.className = 'rows-row';
+          const minus = document.createElement('button');
+          minus.textContent = '−';
+          minus.addEventListener('click', () => {
+            if (preCtxEdits[i].cols[ci].rows > 1) {
+              preCtxEdits[i].cols[ci].rows--;
+              renderPreCtxEditor();
+            }
+          });
+          const val = document.createElement('span');
+          val.className = 'rows-val';
+          val.textContent = col.rows;
+          const plus = document.createElement('button');
+          plus.textContent = '+';
+          plus.addEventListener('click', () => {
+            if (preCtxEdits[i].cols[ci].rows < MAX_ROWS) {
+              preCtxEdits[i].cols[ci].rows++;
+              renderPreCtxEditor();
+            }
+          });
+          rowsRow.appendChild(minus);
+          rowsRow.appendChild(val);
+          rowsRow.appendChild(plus);
+          colCard.appendChild(rowsRow);
+
+          const mini = document.createElement('div');
+          mini.className = 'pat-mini';
+          mini.innerHTML = miniColsHtml([col], 20);
+          colCard.appendChild(mini);
+          colsWrap.appendChild(colCard);
+        });
+        card.appendChild(colsWrap);
+
+        const actions = document.createElement('div');
+        actions.className = 'prectx-actions';
+        const addCol = document.createElement('button');
+        addCol.className = 'btn-secondary btn-sm';
+        addCol.textContent = '＋ Thêm cột tiền cảnh';
+        addCol.addEventListener('click', () => {
+          if (preCtxEdits[i].cols.length + patCols.length >= MAX_PAT_COLS) {
+            alert(`Tổng tiền cảnh + khung tối đa ${MAX_PAT_COLS} cột.`);
+            return;
+          }
+          const lastT = preCtxEdits[i].cols.length ? preCtxEdits[i].cols[preCtxEdits[i].cols.length - 1].type : 'chan';
+          preCtxEdits[i].cols.push({ type: lastT === 'chan' ? 'le' : 'chan', rows: 2 });
+          renderPreCtxEditor();
+        });
+        const delCol = document.createElement('button');
+        delCol.className = 'btn-secondary btn-sm';
+        delCol.textContent = '− Bớt cột';
+        delCol.addEventListener('click', () => {
+          if (preCtxEdits[i].cols.length <= 1) {
+            preCtxEdits.splice(i, 1);
+          } else {
+            preCtxEdits[i].cols.pop();
+          }
+          renderPreCtxEditor();
+        });
+        actions.appendChild(addCol);
+        actions.appendChild(delCol);
+        card.appendChild(actions);
+
+        const meta = document.createElement('div');
+        meta.className = 'prectx-meta';
+        const predName = `prectx-pred-${i}`;
+        const betName = `prectx-bet-${i}`;
+        meta.innerHTML = `
+          <div class="radio-grp" style="gap:10px;">
+            <span style="font-size:10px;color:#64748b;align-self:center;">Dự đoán:</span>
+            <label><input type="radio" name="${predName}" value="chan" ${ctx.predictType === 'chan' ? 'checked' : ''}> Chẵn</label>
+            <label><input type="radio" name="${predName}" value="le" ${ctx.predictType === 'le' ? 'checked' : ''}> Lẻ</label>
+          </div>
+          <div class="radio-grp" style="gap:10px;">
+            <span style="font-size:10px;color:#64748b;align-self:center;">Chế độ:</span>
+            <label><input type="radio" name="${betName}" value="bet" ${ctx.shouldBet ? 'checked' : ''}> BET</label>
+            <label><input type="radio" name="${betName}" value="nobet" ${ctx.shouldBet ? '' : 'checked'}> Không cược</label>
+          </div>`;
+        meta.querySelectorAll(`input[name="${predName}"]`).forEach(el => {
+          el.addEventListener('change', e => { preCtxEdits[i].predictType = e.target.value; renderPreCtxEditor(); });
+        });
+        meta.querySelectorAll(`input[name="${betName}"]`).forEach(el => {
+          el.addEventListener('change', e => { preCtxEdits[i].shouldBet = e.target.value === 'bet'; renderPreCtxEditor(); });
+        });
+        card.appendChild(meta);
+
+        const predBg = ctx.predictType === 'chan' ? '#f1f5f9' : '#dc2626';
+        const predFg = ctx.predictType === 'chan' ? '#0f172a' : '#fff';
+        const predBdr = ctx.shouldBet ? '2px solid #22c55e' : '2px dashed #d97706';
+        const preview = document.createElement('div');
+        preview.style.cssText = 'display:flex;align-items:flex-start;gap:5px;flex-wrap:wrap;padding-top:2px;';
+        preview.innerHTML = `
+          <div style="display:flex;gap:2px;align-items:flex-start;">${miniColsHtml(ctx.cols)}</div>
+          <span style="color:#a78bfa;font-size:12px;padding:1px 2px;">+</span>
+          <div style="display:flex;gap:2px;align-items:flex-start;">${miniColsHtml(patCols)}</div>
+          <span style="color:#475569;font-size:12px;padding:1px 2px;">→</span>
+          <div style="width:20px;height:20px;border-radius:50%;background:${predBg};border:${predBdr};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:${predFg};">${ctx.predictType === 'chan' ? 'C' : 'L'}</div>`;
+        card.appendChild(preview);
+
+        container.appendChild(card);
+      });
+    }
+
+    function addPreContextFromCols(cols, source = 'manual') {
+      const predType = currentModalPredType();
+      const shouldBet = currentModalShouldBet();
+      const ctx = clonePreContext({ cols, predictType: predType, shouldBet, source }, predType, shouldBet);
+      if (!ctx) return;
+      if (ctx.cols.length + patCols.length > MAX_PAT_COLS) {
+        alert(`Tổng tiền cảnh + khung tối đa ${MAX_PAT_COLS} cột.`);
+        return;
+      }
+      const key = preCtxKey(ctx.cols);
+      if (preCtxEdits.some(p => preCtxKey(p.cols) === key)) {
+        showToast('Tiền cảnh này đã tồn tại trong cấu hình', 'warn');
+        return;
+      }
+      ctx.key = key;
+      preCtxEdits.push(ctx);
+      renderPreCtxEditor();
+    }
+
+    function addPreContextFromFrame() {
+      const P = patCols.length;
+      if (!frame.length || !P || frame.length <= P) {
+        alert('Frame hiện tại chưa đủ cột trước khung để lấy tiền cảnh.');
+        return;
+      }
+      const col = frame[frame.length - P - 1];
+      if (!col) return;
+      addPreContextFromCols([{ type: col.type, rows: col.count }], 'frame');
+    }
+
     function renderPatEditor() {
       const container = document.getElementById('pat-cols');
       container.innerHTML = '';
@@ -4288,6 +4672,7 @@
       });
 
       renderPatPreview();
+      renderPreCtxEditor();
     }
 
     function renderPatPreview() {
@@ -4409,11 +4794,13 @@
 
       const predType = document.querySelector('input[name="r-pred"]:checked')?.value || 'chan';
       const shouldBet = document.querySelector('input[name="r-bet"]:checked')?.value === 'bet';
+      const existingCfg = editingId ? configs.find(c => c.id === editingId) : null;
+      const preContexts = normalizePreContexts(preCtxEdits, predType, shouldBet);
 
       const cfgObj = {
         id: editingId || `cfg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         name,
-        enabled: true,
+        enabled: existingCfg ? existingCfg.enabled !== false : true,
         pattern: patCols.map(p => {
           const col = { type: p.type, rows: p.rows };
           if (p.reds && p.reds.slice(0, p.rows).some(v => v != null)) {
@@ -4424,8 +4811,9 @@
         predictType: predType,
         shouldBet,
         note,
-        createdAt: Date.now(),
+        createdAt: existingCfg?.createdAt || Date.now(),
       };
+      if (preContexts.length) cfgObj.preContexts = preContexts;
 
       // ── Duplicate check ──
       const newKey = patternKey(cfgObj.pattern);
@@ -4444,7 +4832,7 @@
 
       if (editingId) {
         const idx = configs.findIndex(c => c.id === editingId);
-        if (idx >= 0) { cfgObj.createdAt = configs[idx].createdAt; configs[idx] = cfgObj; }
+        if (idx >= 0) { configs[idx] = cfgObj; }
         else configs.push(cfgObj);
       } else {
         configs.push(cfgObj);
@@ -4857,6 +5245,12 @@
       if (patCols.length <= 1) { alert('Cần ít nhất 1 cột.'); return; }
       patCols.pop(); renderPatEditor();
     });
+
+    document.getElementById('btn-add-prectx').addEventListener('click', () => {
+      addPreContextFromCols([{ type: 'chan', rows: 2 }], 'manual');
+    });
+
+    document.getElementById('btn-prectx-from-frame').addEventListener('click', addPreContextFromFrame);
 
     document.getElementById('btn-reset-stats').addEventListener('click', resetStats);
     document.getElementById('btn-inject-test').addEventListener('click', injectTestData);

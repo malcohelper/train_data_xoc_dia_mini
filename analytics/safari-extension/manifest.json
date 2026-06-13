@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "Xoc Dia Local Click Bridge",
+  "version": "0.1.0",
+  "description": "Receives local bet intents from frame-predict and dispatches DOM clicks inside the game tab.",
+  "permissions": [
+    "tabs",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gamebai.b5richkids.net/*",
+        "http://gamebai.b5richkids.net/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

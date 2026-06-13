@@ -1299,6 +1299,181 @@
     .nm-item.nm-hl { background: #0f1e2e; }
     .nm-item.nm-top { outline: 1px solid rgba(245,158,11,.3); outline-offset: -1px; }
 
+    /* ══════════════════════════════════════
+       AUTO CLICK
+    ══════════════════════════════════════ */
+    #clicker-card {
+      border-color: #314256;
+    }
+
+    .clicker-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .clicker-section {
+      background: #0f172a;
+      border: 1px solid #24364d;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .clicker-section-title {
+      font-size: 10px;
+      color: #64748b;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 8px;
+    }
+
+    .clicker-chip-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .signal-field {
+      padding: 9px;
+      border: 1px solid #1d2c42;
+      border-radius: 8px;
+      background: #0b1424;
+    }
+
+    .clicker-select {
+      width: 100%;
+      background: #0a1220;
+      color: #e2e8f0;
+      border: 1px solid #2d3f55;
+      border-radius: 7px;
+      padding: 7px 9px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .clicker-plan {
+      margin-top: 10px;
+      min-height: 44px;
+      padding: 10px 11px;
+      border: 1px solid #1e2e42;
+      border-radius: 8px;
+      background: #080e1a;
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .clicker-plan.err {
+      color: #fca5a5;
+      border-color: #3b0f0f;
+      background: #120707;
+    }
+
+    .extension-readout-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .extension-readout {
+      border: 1px solid #1d2c42;
+      border-radius: 8px;
+      background: #0a1220;
+      padding: 10px;
+      min-height: 108px;
+    }
+
+    .extension-readout-title {
+      color: #64748b;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .extension-readout-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 4px 0;
+      border-top: 1px solid rgba(45, 63, 85, .45);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .extension-readout-line:first-of-type {
+      border-top: 0;
+    }
+
+    .extension-readout-line span {
+      color: #64748b;
+      white-space: nowrap;
+    }
+
+    .extension-readout-line strong {
+      color: #dbeafe;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .extension-readout-line strong.ok {
+      color: #4ade80;
+    }
+
+    .extension-readout-line strong.warn {
+      color: #fbbf24;
+    }
+
+    .extension-readout-line strong.err {
+      color: #fca5a5;
+    }
+
+    .clicker-main-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    #btn-extension-bet {
+      background: #1e3a5f;
+      border-color: #3b82f6;
+      color: #dbeafe;
+      font-weight: 800;
+      padding: 8px 13px;
+    }
+
+    #btn-extension-bet:hover {
+      background: #1d4ed8;
+      color: #eff6ff;
+    }
+
+    #btn-extension-bet:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    #clicker-msg {
+      font-size: 11px;
+      color: #64748b;
+      min-height: 16px;
+    }
+
+    @media (max-width: 920px) {
+      .clicker-grid {
+        grid-template-columns: 1fr;
+      }
+      .extension-readout-grid,
+      .clicker-chip-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
   </style>
 </head>
 
@@ -1425,6 +1600,55 @@
         <span id="match-label" style="font-size:11px;color:#475569;"></span>
       </div>
       <div id="pred-panel"></div>
+    </div>
+
+    <!-- ── AUTO CLICK ── -->
+    <div class="card" id="clicker-card">
+      <div class="card-header">
+        <h2>Extension Signal</h2>
+      </div>
+      <div class="clicker-grid">
+        <div class="clicker-section">
+          <div class="clicker-section-title">Tín hiệu gửi sang extension</div>
+          <div class="clicker-chip-row">
+            <label class="signal-field">
+              <span class="form-lbl">Đang chọn</span>
+              <select class="clicker-select" id="clicker-current"></select>
+            </label>
+            <label class="signal-field">
+              <span class="form-lbl">Muốn đặt</span>
+              <select class="clicker-select" id="clicker-target"></select>
+            </label>
+            <label class="signal-field">
+              <span class="form-lbl">Bên Extension</span>
+              <select class="clicker-select" id="extension-side">
+                <option value="auto">Auto dự đoán</option>
+                <option value="chan">Chẵn</option>
+                <option value="le">Lẻ</option>
+              </select>
+            </label>
+            <label class="signal-field">
+              <span class="form-lbl">Delay giữa các click (ms)</span>
+              <select class="clicker-select" id="clicker-interval"></select>
+            </label>
+          </div>
+          <div class="clicker-plan" id="extension-plan">Extension: —</div>
+          <div class="extension-readout-grid">
+            <div class="extension-readout">
+              <div class="extension-readout-title">Sắp gửi</div>
+              <div id="extension-preview">Chưa có tín hiệu hợp lệ.</div>
+            </div>
+            <div class="extension-readout">
+              <div class="extension-readout-title">Server / Extension</div>
+              <div id="extension-server-state">Chưa có intent.</div>
+            </div>
+          </div>
+          <div class="clicker-main-actions">
+            <button class="btn-secondary btn-sm" id="btn-extension-bet">Gửi Extension</button>
+            <span id="clicker-msg"></span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── STATS ── -->
@@ -1615,12 +1839,18 @@
     // serve.py hỗ trợ ?tail=N để chỉ trả về N rounds cuối → nhanh hơn nhiều
     // khi rounds/ có hàng nghìn file.
     const TAIL_SIZE = 90;
-    const API_URL = `/api/rounds.json?tail=${TAIL_SIZE}`;
+    const PAGE_HOST_IS_LOCAL = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(location.hostname);
+    const API_BASE = location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
+    const LOCAL_API_BASE = (location.protocol === 'file:' || !PAGE_HOST_IS_LOCAL) ? 'http://127.0.0.1:8000' : '';
+    const API_URL = `${API_BASE}/api/rounds.json?tail=${TAIL_SIZE}`;
     const POLL_MS = 3000;
     const STATS_HIST_INLINE_MAX = 100;
     const MAX_COLS = 15;
     const MAX_ROWS = 6;
     const MAX_PAT_COLS = 15;   // max columns per pattern (cùng số cột tối đa với lưới frame)
+    const CLICKER_AMOUNTS = ['1k', '5k', '10k', '20k', '50k', '200k', '500k', '2m', '5m', '20m', '50m'];
+    const CLICKER_INTERVALS = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600];
+    const CLICKER_INTERVAL_MS = 250;
 
     const DICE_TO_RED = {
       '4_red': 4, '3r_1w': 3, '2w_2r': 2, '3w_1r': 1, '4_white': 0
@@ -1705,6 +1935,9 @@
     let preCtxEdits = [];
     let pollTimer = null;
     let cfgFilter = 'all';  // 'all' | 'bet' | 'predict' | 'off'
+    let clickerCfg = null;
+    let extensionStatus = { ok: false, seq: 0, lastResult: null };
+    let extensionBusy = false;
 
     // Tracking realtime
     let lastSeenId = null;   // round_id cuối đã xử lý — để phát hiện round mới
@@ -1733,6 +1966,7 @@
     const PCT_HIST_KEY = 'xd_pct_hist_v1';
     const CFG_HIST_KEY = 'xd_cfg_hist_v1';
     const CFG_BREAK_KEY = 'xd_cfg_break_v1';
+    const CLICKER_CFG_KEY = 'xd_clicker_cfg_v1';
 
     function ls(k, def) { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } }
 
@@ -1810,6 +2044,48 @@
       return out;
     }
     function saveBreakHist() { localStorage.setItem(CFG_BREAK_KEY, JSON.stringify(cfgBreakHistory)); }
+
+    function defaultClickerCfg() {
+      return {
+        currentAmount: '20k',
+        targetAmount: '20k',
+        extensionSide: 'chan',
+        intervalMs: CLICKER_INTERVAL_MS,
+      };
+    }
+
+    function normalizeClickerAmount(value, fallback = '20k') {
+      return CLICKER_AMOUNTS.includes(value) ? value : fallback;
+    }
+
+    function normalizeExtensionSide(value, fallback = 'auto') {
+      return ['auto', 'chan', 'le'].includes(value) ? value : fallback;
+    }
+
+    function normalizeClickerInterval(value, fallback = CLICKER_INTERVAL_MS) {
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n)) return fallback;
+      return CLICKER_INTERVALS.includes(n) ? n : fallback;
+    }
+
+    function normalizeClickerCfg(raw) {
+      const def = defaultClickerCfg();
+      if (!raw || typeof raw !== 'object') return def;
+      return {
+        currentAmount: normalizeClickerAmount(raw.currentAmount, def.currentAmount),
+        targetAmount: normalizeClickerAmount(raw.targetAmount, def.targetAmount),
+        extensionSide: normalizeExtensionSide(raw.extensionSide, def.extensionSide),
+        intervalMs: normalizeClickerInterval(raw.intervalMs, def.intervalMs),
+      };
+    }
+
+    function loadClickerCfg() {
+      return normalizeClickerCfg(ls(CLICKER_CFG_KEY, null));
+    }
+
+    function saveClickerCfg() {
+      localStorage.setItem(CLICKER_CFG_KEY, JSON.stringify(clickerCfg));
+    }
 
     /* ──────────────────────────────────────
        HISTORY SIDEBAR
@@ -4941,6 +5217,278 @@
       }
     }
 
+    /* ──────────────────────────────────────
+       AUTO CLICK
+    ────────────────────────────────────── */
+    function setClickerMsg(text, kind = '') {
+      const el = document.getElementById('clicker-msg');
+      if (!el) return;
+      el.textContent = text || '';
+      el.style.color = kind === 'ok' ? '#4ade80' : kind === 'err' ? '#fca5a5' : '#64748b';
+    }
+
+    function clickerApiPath(path) {
+      return `${LOCAL_API_BASE}${path}`;
+    }
+
+    async function extensionPost(path, payload) {
+      const res = await fetch(clickerApiPath(path), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {}),
+      });
+      let data = null;
+      try { data = await res.json(); } catch { data = null; }
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.reason || res.statusText || 'Extension request failed');
+      }
+      return data || {};
+    }
+
+    async function refreshExtensionStatus(render = true) {
+      try {
+        const res = await fetch(`${clickerApiPath('/api/extension/status')}?_=${Date.now()}`);
+        if (!res.ok) throw new Error(res.statusText);
+        extensionStatus = await res.json();
+      } catch {
+        extensionStatus = { ok: false, seq: 0, lastResult: null };
+      }
+      if (render) renderClicker();
+      return extensionStatus;
+    }
+
+    function sideText(side) {
+      return side === 'le' ? 'Lẻ' : side === 'chan' ? 'Chẵn' : 'Auto';
+    }
+
+    function amountText(amount) {
+      return String(amount || '').toUpperCase();
+    }
+
+    function stepText(steps) {
+      const n = Math.trunc(Number(steps || 0));
+      if (n > 0) return `Chip phải x${n}`;
+      if (n < 0) return `Chip trái x${Math.abs(n)}`;
+      return 'Không đổi chip';
+    }
+
+    function readoutRows(rows) {
+      return rows.map(([label, value, tone = '']) => (
+        `<div class="extension-readout-line"><span>${esc(label)}</span><strong class="${esc(tone)}">${esc(value)}</strong></div>`
+      )).join('');
+    }
+
+    function renderResultReadout(lastIntent, lastResult) {
+      if (!lastIntent) {
+        return readoutRows([
+          ['Server', 'Chưa nhận intent'],
+          ['Extension', 'Đang chờ tín hiệu'],
+        ]);
+      }
+      const intentSeq = Number(lastIntent.seq || 0);
+      const resultSeq = Number(lastResult?.seq || 0);
+      const rows = [
+        ['Server', `Đã nhận #${intentSeq}`, 'ok'],
+        ['Latest', `${sideText(lastIntent.side)} ${amountText(lastIntent.currentAmount)} -> ${amountText(lastIntent.targetAmount)}`],
+      ];
+      if (!lastResult || resultSeq < intentSeq) {
+        rows.push(['Extension', 'Chưa phản hồi', 'warn']);
+        rows.push(['Fallback', 'Reload game tab hoặc extension nếu đứng lâu', 'warn']);
+        return readoutRows(rows);
+      }
+      rows.push([
+        'Extension',
+        lastResult.success ? `OK #${resultSeq}` : `FAIL #${resultSeq}`,
+        lastResult.success ? 'ok' : 'err',
+      ]);
+      rows.push(['Message', lastResult.message || 'Không có message', lastResult.success ? 'ok' : 'err']);
+      return readoutRows(rows);
+    }
+
+    function buildExtensionPlan() {
+      if (!clickerCfg) return { ok: false, reason: 'Chưa tải cấu hình clicker.' };
+      const currentIdx = CLICKER_AMOUNTS.indexOf(clickerCfg.currentAmount);
+      const targetIdx = CLICKER_AMOUNTS.indexOf(clickerCfg.targetAmount);
+      if (currentIdx < 0 || targetIdx < 0) return { ok: false, reason: 'Mức cược không hợp lệ.' };
+      const mode = normalizeExtensionSide(clickerCfg.extensionSide);
+      let side = mode;
+      let sourceText = 'Thủ công';
+      if (mode === 'auto') {
+        if (!matched.length) return { ok: false, reason: 'Auto: chưa có cấu hình nào khớp.' };
+        const primary = matched[0];
+        if (!primary.shouldBet) return { ok: false, reason: 'Auto: dự đoán chính đang ở chế độ không cược.' };
+        side = primary.predictType === 'le' ? 'le' : 'chan';
+        sourceText = 'Auto';
+      }
+      const steps = targetIdx - currentIdx;
+      const labels = [];
+      if (steps > 0) labels.push(`Chip phải ×${steps}`);
+      if (steps < 0) labels.push(`Chip trái ×${Math.abs(steps)}`);
+      labels.push(side === 'chan' ? 'Chẵn' : 'Lẻ');
+      return {
+        ok: true,
+        labels,
+        side,
+        steps,
+        sourceText,
+        predictionText: side === 'chan' ? 'Chẵn' : 'Lẻ',
+        amountText: `${clickerCfg.currentAmount} → ${clickerCfg.targetAmount}`,
+        intent: {
+          side,
+          currentAmount: clickerCfg.currentAmount,
+          targetAmount: clickerCfg.targetAmount,
+          intervalMs: clickerCfg.intervalMs,
+        },
+      };
+    }
+
+    function renderClicker() {
+      const card = document.getElementById('clicker-card');
+      if (!card || !clickerCfg) return;
+
+      const curSel = document.getElementById('clicker-current');
+      const tgtSel = document.getElementById('clicker-target');
+      const extSideSel = document.getElementById('extension-side');
+      const intervalInp = document.getElementById('clicker-interval');
+      if (curSel && curSel.value !== clickerCfg.currentAmount) curSel.value = clickerCfg.currentAmount;
+      if (tgtSel && tgtSel.value !== clickerCfg.targetAmount) tgtSel.value = clickerCfg.targetAmount;
+      if (extSideSel && extSideSel.value !== clickerCfg.extensionSide) extSideSel.value = clickerCfg.extensionSide;
+      if (intervalInp && Number(intervalInp.value) !== clickerCfg.intervalMs) intervalInp.value = String(clickerCfg.intervalMs);
+
+      const extPlan = buildExtensionPlan();
+      const extPlanEl = document.getElementById('extension-plan');
+      if (extPlanEl) {
+        const last = extensionStatus?.lastResult;
+        const lastText = last
+          ? ` · last #${last.seq}: ${last.success ? 'OK' : 'FAIL'} ${last.message || ''}`
+          : '';
+        extPlanEl.classList.toggle('err', !extPlan.ok);
+        extPlanEl.innerHTML = extPlan.ok
+          ? `Extension ${esc(extPlan.sourceText)}: <strong style="color:#bbf7d0;">${esc(extPlan.predictionText)}</strong> · ${esc(extPlan.amountText)} · ${esc(extPlan.labels.join(' → '))} · delay ${esc(clickerCfg.intervalMs)}ms${esc(lastText)}`
+          : `Extension: ${esc(extPlan.reason)}${esc(lastText)}`;
+      }
+      const previewEl = document.getElementById('extension-preview');
+      if (previewEl) {
+        previewEl.innerHTML = extPlan.ok
+          ? readoutRows([
+              ['Mode', extPlan.sourceText],
+              ['Bên sẽ đặt', extPlan.predictionText],
+              ['Tiền', `${amountText(clickerCfg.currentAmount)} -> ${amountText(clickerCfg.targetAmount)}`],
+              ['Chip', stepText(extPlan.steps)],
+              ['Delay', `${clickerCfg.intervalMs} ms`],
+            ])
+          : readoutRows([
+              ['Trạng thái', extPlan.reason, 'warn'],
+              ['Mode', sideText(clickerCfg.extensionSide)],
+            ]);
+      }
+      const serverEl = document.getElementById('extension-server-state');
+      if (serverEl) {
+        serverEl.innerHTML = renderResultReadout(extensionStatus?.lastIntent, extensionStatus?.lastResult);
+      }
+      const extBtn = document.getElementById('btn-extension-bet');
+      if (extBtn) extBtn.disabled = !extPlan.ok || extensionBusy;
+    }
+
+    async function sendExtensionBet() {
+      if (extensionBusy) {
+        setClickerMsg('Extension đang xử lý intent trước đó.', 'err');
+        return;
+      }
+      const plan = buildExtensionPlan();
+      if (!plan.ok) {
+        setClickerMsg(plan.reason, 'err');
+        renderClicker();
+        return;
+      }
+      extensionBusy = true;
+      const intentUrl = clickerApiPath('/api/extension/intent');
+      setClickerMsg(`Đang gửi Extension ${plan.sourceText} tới ${intentUrl}: ${plan.labels.join(' → ')}...`, '');
+      renderClicker();
+      try {
+        const sent = await extensionPost('/api/extension/intent', plan.intent);
+        const seq = Number(sent.seq || sent.intent?.seq || 0);
+        const serverSteps = Math.abs(Number(sent.intent?.steps || 0));
+        const serverInterval = Number(sent.intent?.intervalMs || clickerCfg.intervalMs || CLICKER_INTERVAL_MS);
+        const waitAttempts = Math.max(14, Math.ceil((serverSteps * serverInterval + 2500) / 300));
+        let result = null;
+        for (let i = 0; i < waitAttempts; i++) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const status = await refreshExtensionStatus(false);
+          if (status?.lastResult && Number(status.lastResult.seq) === seq) {
+            result = status.lastResult;
+            break;
+          }
+        }
+        if (result?.success) {
+          const prevCurrent = clickerCfg.currentAmount;
+          clickerCfg.currentAmount = clickerCfg.targetAmount;
+          clickerCfg.targetAmount = prevCurrent;
+          saveClickerCfg();
+          setClickerMsg(`Extension đã đặt ${plan.predictionText}; đã swap mức cược.`, 'ok');
+        } else if (result) {
+          setClickerMsg(`Extension lỗi: ${result.message || 'không rõ lỗi'}`, 'err');
+        } else {
+          setClickerMsg(`Server đã nhận Extension #${seq}; chưa thấy extension phản hồi. Kiểm tra tab game nếu đứng lâu.`, '');
+        }
+      } catch (err) {
+        setClickerMsg(err.message, 'err');
+      } finally {
+        extensionBusy = false;
+        renderClicker();
+      }
+    }
+
+    function initClickerControls() {
+      clickerCfg = loadClickerCfg();
+      const opts = CLICKER_AMOUNTS.map(v => `<option value="${v}">${v.toUpperCase()}</option>`).join('');
+      const delayOpts = CLICKER_INTERVALS.map(v => `<option value="${v}">${v} ms</option>`).join('');
+      const curSel = document.getElementById('clicker-current');
+      const tgtSel = document.getElementById('clicker-target');
+      const extSideSel = document.getElementById('extension-side');
+      const intervalInp = document.getElementById('clicker-interval');
+      if (curSel) {
+        curSel.innerHTML = opts;
+        curSel.value = clickerCfg.currentAmount;
+        curSel.addEventListener('change', e => {
+          clickerCfg.currentAmount = normalizeClickerAmount(e.target.value, clickerCfg.currentAmount);
+          saveClickerCfg();
+          renderClicker();
+        });
+      }
+      if (tgtSel) {
+        tgtSel.innerHTML = opts;
+        tgtSel.value = clickerCfg.targetAmount;
+        tgtSel.addEventListener('change', e => {
+          clickerCfg.targetAmount = normalizeClickerAmount(e.target.value, clickerCfg.targetAmount);
+          saveClickerCfg();
+          renderClicker();
+        });
+      }
+      if (extSideSel) {
+        extSideSel.value = clickerCfg.extensionSide;
+        extSideSel.addEventListener('change', e => {
+          clickerCfg.extensionSide = normalizeExtensionSide(e.target.value, clickerCfg.extensionSide);
+          saveClickerCfg();
+          renderClicker();
+        });
+      }
+      if (intervalInp) {
+        intervalInp.innerHTML = delayOpts;
+        intervalInp.value = String(clickerCfg.intervalMs);
+        intervalInp.addEventListener('change', e => {
+          clickerCfg.intervalMs = normalizeClickerInterval(e.target.value, clickerCfg.intervalMs);
+          e.target.value = String(clickerCfg.intervalMs);
+          saveClickerCfg();
+          renderClicker();
+        });
+      }
+      document.getElementById('btn-extension-bet').addEventListener('click', sendExtensionBet);
+      renderClicker();
+      refreshExtensionStatus();
+      setInterval(() => refreshExtensionStatus(false).then(renderClicker), 5000);
+    }
+
 
     /* ──────────────────────────────────────
        RECOMPUTE (after any state change)
@@ -5042,6 +5590,7 @@
       computeNearMatches();
       renderGrid();
       renderPred();
+      renderClicker();
       renderNearMatchPanel();
       renderCfgList();
     }
@@ -5282,6 +5831,7 @@
     cfgBreakHistory = loadBreakHist();
     pending = loadPending();
     lastSeenId = loadSeen();
+    initClickerControls();
     recompute();
     renderStats();
     refresh();

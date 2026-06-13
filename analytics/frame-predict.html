@@ -1353,6 +1353,79 @@
       outline: none;
     }
 
+    .clicker-select:disabled,
+    .progression-input:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    .progression-panel {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #24364d;
+      border-radius: 8px;
+      background: #0b1424;
+    }
+
+    .progression-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .progression-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #dbeafe;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .progression-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .progression-input {
+      width: 100%;
+      background: #0a1220;
+      color: #e2e8f0;
+      border: 1px solid #2d3f55;
+      border-radius: 7px;
+      padding: 7px 9px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .progression-meter {
+      margin-top: 10px;
+      height: 8px;
+      border-radius: 999px;
+      background: #08111e;
+      border: 1px solid #1d2c42;
+      overflow: hidden;
+    }
+
+    .progression-meter-fill {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444);
+      transition: width .18s ease;
+    }
+
+    .progression-summary {
+      margin-top: 8px;
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
     .clicker-plan {
       margin-top: 10px;
       min-height: 44px;
@@ -1469,6 +1542,7 @@
         grid-template-columns: 1fr;
       }
       .extension-readout-grid,
+      .progression-grid,
       .clicker-chip-row {
         grid-template-columns: 1fr;
       }
@@ -1631,6 +1705,33 @@
               <span class="form-lbl">Delay giữa các click (ms)</span>
               <select class="clicker-select" id="clicker-interval"></select>
             </label>
+          </div>
+          <div class="progression-panel">
+            <div class="progression-head">
+              <label class="progression-toggle">
+                <input type="checkbox" id="progression-enabled">
+                <span>Progression chuỗi thua</span>
+              </label>
+              <button class="btn-secondary btn-sm" id="btn-progression-reset" type="button">Reset progression</button>
+            </div>
+            <div class="progression-grid">
+              <label class="signal-field">
+                <span class="form-lbl">Session size</span>
+                <input class="progression-input" id="progression-session" type="number" min="1" max="20" step="1">
+              </label>
+              <label class="signal-field">
+                <span class="form-lbl">Base clicks</span>
+                <input class="progression-input" id="progression-base" type="number" min="1" max="256" step="1">
+              </label>
+              <label class="signal-field">
+                <span class="form-lbl">Max clicks</span>
+                <input class="progression-input" id="progression-max" type="number" min="1" max="256" step="1">
+              </label>
+            </div>
+            <div class="progression-meter" aria-hidden="true">
+              <div class="progression-meter-fill" id="progression-meter-fill"></div>
+            </div>
+            <div class="progression-summary" id="progression-summary">Progression: —</div>
           </div>
           <div class="clicker-plan" id="extension-plan">Extension: —</div>
           <div class="extension-readout-grid">
@@ -1936,12 +2037,13 @@
     let pollTimer = null;
     let cfgFilter = 'all';  // 'all' | 'bet' | 'predict' | 'off'
     let clickerCfg = null;
+    let progressionCfg = null;
     let extensionStatus = { ok: false, seq: 0, lastResult: null };
     let extensionBusy = false;
 
     // Tracking realtime
     let lastSeenId = null;   // round_id cuối đã xử lý — để phát hiện round mới
-    let pending = null;   // {predictType, hasBet, configName, blocks?, matchedCfgs?} — chờ kết quả
+    let pending = null;   // {predictType, hasBet, configName, blocks?, matchedCfgs?, extensionBet?} — chờ kết quả
     /** predict/bet toàn cục + cfg[id] = { correct, total, betCorrect, betTotal } theo từng cấu hình khớp lúc khóa. */
     let stats = { predict: { correct: 0, total: 0 }, bet: { correct: 0, total: 0 }, cfg: {} };
     let predHistory = [];     // [{ts, roundId, predictType, hasBet, actualType, correct}]
@@ -1967,6 +2069,7 @@
     const CFG_HIST_KEY = 'xd_cfg_hist_v1';
     const CFG_BREAK_KEY = 'xd_cfg_break_v1';
     const CLICKER_CFG_KEY = 'xd_clicker_cfg_v1';
+    const PROGRESSION_CFG_KEY = 'xd_progression_cfg_v1';
 
     function ls(k, def) { try { return JSON.parse(localStorage.getItem(k)) ?? def; } catch { return def; } }
 
@@ -2085,6 +2188,74 @@
 
     function saveClickerCfg() {
       localStorage.setItem(CLICKER_CFG_KEY, JSON.stringify(clickerCfg));
+    }
+
+    function clampInt(value, fallback, min, max) {
+      const n = Math.trunc(Number(value));
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function defaultProgressionCfg() {
+      return {
+        enabled: true,
+        sessionSize: 4,
+        baseClicks: 1,
+        maxClicks: 64,
+        lossStreak: 0,
+      };
+    }
+
+    function normalizeProgressionCfg(raw) {
+      const def = defaultProgressionCfg();
+      if (!raw || typeof raw !== 'object') return def;
+      return {
+        enabled: typeof raw.enabled === 'boolean' ? raw.enabled : def.enabled,
+        sessionSize: clampInt(raw.sessionSize, def.sessionSize, 1, 20),
+        baseClicks: clampInt(raw.baseClicks, def.baseClicks, 1, 256),
+        maxClicks: clampInt(raw.maxClicks, def.maxClicks, 1, 256),
+        lossStreak: clampInt(raw.lossStreak, def.lossStreak, 0, 200),
+      };
+    }
+
+    function loadProgressionCfg() {
+      return normalizeProgressionCfg(ls(PROGRESSION_CFG_KEY, null));
+    }
+
+    function saveProgressionCfg() {
+      localStorage.setItem(PROGRESSION_CFG_KEY, JSON.stringify(progressionCfg));
+    }
+
+    function progressionState() {
+      const cfg = normalizeProgressionCfg(progressionCfg);
+      const lossStreak = cfg.lossStreak;
+      const progressPct = Math.min(100, Math.round(lossStreak / cfg.sessionSize * 100));
+      const rawClicks = cfg.baseClicks * Math.pow(2, lossStreak);
+      const betClicks = Math.min(256, rawClicks);
+      const overCap = rawClicks > cfg.maxClicks || rawClicks > 256;
+      return { ...cfg, lossStreak, progressPct, rawClicks, betClicks, overCap };
+    }
+
+    function amountToNumber(amount) {
+      const text = String(amount || '').toLowerCase().trim();
+      const m = text.match(/^(\d+(?:\.\d+)?)([km])$/);
+      if (!m) return null;
+      const base = Number(m[1]);
+      if (!Number.isFinite(base)) return null;
+      return Math.round(base * (m[2] === 'm' ? 1000000 : 1000));
+    }
+
+    function formatMoneyEstimate(value) {
+      if (!Number.isFinite(value)) return '—';
+      if (value >= 1000000 && value % 1000000 === 0) return `${value / 1000000}M`;
+      if (value >= 1000 && value % 1000 === 0) return `${value / 1000}K`;
+      return value.toLocaleString('vi-VN');
+    }
+
+    function progressionEstimateText(clicks, amount) {
+      const unit = amountToNumber(amount);
+      if (!unit) return `${amountText(amount)} x ${clicks}`;
+      return `${amountText(amount)} x ${clicks} = ${formatMoneyEstimate(unit * clicks)}`;
     }
 
     /* ──────────────────────────────────────
@@ -5290,6 +5461,7 @@
       const rows = [
         ['Server', `Đã nhận #${intentSeq}`, 'ok'],
         ['Latest', `${sideText(lastIntent.side)} ${amountText(lastIntent.currentAmount)} -> ${amountText(lastIntent.targetAmount)}`],
+        ['Bet clicks', `${Number(lastIntent.betClicks || 1)} lần`],
       ];
       if (!lastResult || resultSeq < intentSeq) {
         rows.push(['Extension', 'Chưa phản hồi', 'warn']);
@@ -5301,15 +5473,51 @@
         lastResult.success ? `OK #${resultSeq}` : `FAIL #${resultSeq}`,
         lastResult.success ? 'ok' : 'err',
       ]);
+      rows.push(['Result clicks', `${Number(lastResult.betClicks || 1)} lần`, lastResult.success ? 'ok' : 'err']);
       rows.push(['Message', lastResult.message || 'Không có message', lastResult.success ? 'ok' : 'err']);
       return readoutRows(rows);
+    }
+
+    function buildPendingFromMatched() {
+      if (!matched.length) return null;
+      return {
+        predictType: matched[0].predictType,
+        hasBet: matched.some(m => m.shouldBet),
+        configName: matched.map(m => m.name).join(', '),
+        blocks: snapshotMatchBlocks(matched),
+        matchedCfgs: matched.map(m => ({
+          id: m.id,
+          predictType: m.predictType,
+          shouldBet: !!m.shouldBet,
+        })),
+      };
+    }
+
+    function applyProgressionResult(correct) {
+      progressionCfg = normalizeProgressionCfg(progressionCfg);
+      if (correct) {
+        progressionCfg.lossStreak = 0;
+      } else {
+        progressionCfg.lossStreak = clampInt((progressionCfg.lossStreak || 0) + 1, 1, 0, 200);
+      }
+      saveProgressionCfg();
     }
 
     function buildExtensionPlan() {
       if (!clickerCfg) return { ok: false, reason: 'Chưa tải cấu hình clicker.' };
       const currentIdx = CLICKER_AMOUNTS.indexOf(clickerCfg.currentAmount);
-      const targetIdx = CLICKER_AMOUNTS.indexOf(clickerCfg.targetAmount);
+      const progress = progressionState();
+      const useProgression = !!progress.enabled;
+      const effectiveTarget = useProgression ? clickerCfg.currentAmount : clickerCfg.targetAmount;
+      const targetIdx = CLICKER_AMOUNTS.indexOf(effectiveTarget);
       if (currentIdx < 0 || targetIdx < 0) return { ok: false, reason: 'Mức cược không hợp lệ.' };
+      if (useProgression && progress.overCap) {
+        return {
+          ok: false,
+          reason: `Progression vượt max clicks (${progress.rawClicks} > ${progress.maxClicks}). Hãy tăng max hoặc reset.`,
+          progress,
+        };
+      }
       const mode = normalizeExtensionSide(clickerCfg.extensionSide);
       let side = mode;
       let sourceText = 'Thủ công';
@@ -5324,19 +5532,25 @@
       const labels = [];
       if (steps > 0) labels.push(`Chip phải ×${steps}`);
       if (steps < 0) labels.push(`Chip trái ×${Math.abs(steps)}`);
-      labels.push(side === 'chan' ? 'Chẵn' : 'Lẻ');
+      labels.push(`${side === 'chan' ? 'Chẵn' : 'Lẻ'} ×${useProgression ? progress.betClicks : 1}`);
       return {
         ok: true,
         labels,
         side,
         steps,
+        progress,
+        useProgression,
+        betClicks: useProgression ? progress.betClicks : 1,
         sourceText,
         predictionText: side === 'chan' ? 'Chẵn' : 'Lẻ',
-        amountText: `${clickerCfg.currentAmount} → ${clickerCfg.targetAmount}`,
+        amountText: useProgression
+          ? progressionEstimateText(progress.betClicks, clickerCfg.currentAmount)
+          : `${clickerCfg.currentAmount} → ${clickerCfg.targetAmount}`,
         intent: {
           side,
           currentAmount: clickerCfg.currentAmount,
-          targetAmount: clickerCfg.targetAmount,
+          targetAmount: effectiveTarget,
+          betClicks: useProgression ? progress.betClicks : 1,
           intervalMs: clickerCfg.intervalMs,
         },
       };
@@ -5350,10 +5564,32 @@
       const tgtSel = document.getElementById('clicker-target');
       const extSideSel = document.getElementById('extension-side');
       const intervalInp = document.getElementById('clicker-interval');
+      const progEnabled = document.getElementById('progression-enabled');
+      const progSession = document.getElementById('progression-session');
+      const progBase = document.getElementById('progression-base');
+      const progMax = document.getElementById('progression-max');
+      const progMeter = document.getElementById('progression-meter-fill');
+      const progSummary = document.getElementById('progression-summary');
+      const progress = progressionState();
       if (curSel && curSel.value !== clickerCfg.currentAmount) curSel.value = clickerCfg.currentAmount;
       if (tgtSel && tgtSel.value !== clickerCfg.targetAmount) tgtSel.value = clickerCfg.targetAmount;
       if (extSideSel && extSideSel.value !== clickerCfg.extensionSide) extSideSel.value = clickerCfg.extensionSide;
       if (intervalInp && Number(intervalInp.value) !== clickerCfg.intervalMs) intervalInp.value = String(clickerCfg.intervalMs);
+      if (tgtSel) tgtSel.disabled = !!progress.enabled;
+      if (progEnabled) progEnabled.checked = !!progress.enabled;
+      if (progSession && Number(progSession.value) !== progress.sessionSize) progSession.value = String(progress.sessionSize);
+      if (progBase && Number(progBase.value) !== progress.baseClicks) progBase.value = String(progress.baseClicks);
+      if (progMax && Number(progMax.value) !== progress.maxClicks) progMax.value = String(progress.maxClicks);
+      if (progSession) progSession.disabled = !progress.enabled;
+      if (progBase) progBase.disabled = !progress.enabled;
+      if (progMax) progMax.disabled = !progress.enabled;
+      if (progMeter) progMeter.style.width = `${Math.min(100, Math.max(0, progress.progressPct))}%`;
+      if (progSummary) {
+        const tone = progress.overCap ? 'color:#fca5a5;' : progress.progressPct >= 100 ? 'color:#fbbf24;' : '';
+        progSummary.innerHTML = progress.enabled
+          ? `<span style="${tone}">Thua liên tiếp: <b>${esc(progress.lossStreak)}</b> · Session: <b>${esc(progress.progressPct)}%</b> · Click cửa: <b>${esc(progress.betClicks)}</b> · ${esc(progressionEstimateText(progress.betClicks, clickerCfg.currentAmount))}</span>`
+          : 'Progression đang tắt; dùng "Muốn đặt" để đổi chip như trước.';
+      }
 
       const extPlan = buildExtensionPlan();
       const extPlanEl = document.getElementById('extension-plan');
@@ -5373,13 +5609,15 @@
           ? readoutRows([
               ['Mode', extPlan.sourceText],
               ['Bên sẽ đặt', extPlan.predictionText],
-              ['Tiền', `${amountText(clickerCfg.currentAmount)} -> ${amountText(clickerCfg.targetAmount)}`],
+              ['Tiền', extPlan.useProgression ? progressionEstimateText(extPlan.betClicks, clickerCfg.currentAmount) : `${amountText(clickerCfg.currentAmount)} -> ${amountText(clickerCfg.targetAmount)}`],
               ['Chip', stepText(extPlan.steps)],
+              ['Click cửa', `${extPlan.betClicks} lần`],
               ['Delay', `${clickerCfg.intervalMs} ms`],
             ])
           : readoutRows([
               ['Trạng thái', extPlan.reason, 'warn'],
               ['Mode', sideText(clickerCfg.extensionSide)],
+              ['Progression', progress.enabled ? `${progress.progressPct}% / ${progress.betClicks} click` : 'Tắt', progress.overCap ? 'err' : ''],
             ]);
       }
       const serverEl = document.getElementById('extension-server-state');
@@ -5409,8 +5647,9 @@
         const sent = await extensionPost('/api/extension/intent', plan.intent);
         const seq = Number(sent.seq || sent.intent?.seq || 0);
         const serverSteps = Math.abs(Number(sent.intent?.steps || 0));
+        const serverBetClicks = Math.max(1, Number(sent.intent?.betClicks || plan.betClicks || 1));
         const serverInterval = Number(sent.intent?.intervalMs || clickerCfg.intervalMs || CLICKER_INTERVAL_MS);
-        const waitAttempts = Math.max(14, Math.ceil((serverSteps * serverInterval + 2500) / 300));
+        const waitAttempts = Math.max(14, Math.ceil(((serverSteps + serverBetClicks) * serverInterval + 2500) / 300));
         let result = null;
         for (let i = 0; i < waitAttempts; i++) {
           await new Promise(resolve => setTimeout(resolve, 300));
@@ -5421,11 +5660,32 @@
           }
         }
         if (result?.success) {
-          const prevCurrent = clickerCfg.currentAmount;
-          clickerCfg.currentAmount = clickerCfg.targetAmount;
-          clickerCfg.targetAmount = prevCurrent;
-          saveClickerCfg();
-          setClickerMsg(`Extension đã đặt ${plan.predictionText}; đã swap mức cược.`, 'ok');
+          if (plan.useProgression) {
+            const nextPending = pending || buildPendingFromMatched();
+            if (nextPending && nextPending.hasBet) {
+              pending = {
+                ...nextPending,
+                extensionBet: {
+                  seq,
+                  side: plan.side,
+                  betClicks: serverBetClicks,
+                  chipAmount: clickerCfg.currentAmount,
+                  progressionEnabled: true,
+                  ts: Date.now(),
+                },
+              };
+              savePending();
+              setClickerMsg(`Extension đã đặt ${plan.predictionText} x${serverBetClicks}; chờ kết quả để cập nhật progression.`, 'ok');
+            } else {
+              setClickerMsg(`Extension đã đặt ${plan.predictionText} x${serverBetClicks}; không gắn progression vì không có BET pending khớp.`, '');
+            }
+          } else {
+            const prevCurrent = clickerCfg.currentAmount;
+            clickerCfg.currentAmount = clickerCfg.targetAmount;
+            clickerCfg.targetAmount = prevCurrent;
+            saveClickerCfg();
+            setClickerMsg(`Extension đã đặt ${plan.predictionText}; đã swap mức cược.`, 'ok');
+          }
         } else if (result) {
           setClickerMsg(`Extension lỗi: ${result.message || 'không rõ lỗi'}`, 'err');
         } else {
@@ -5441,12 +5701,18 @@
 
     function initClickerControls() {
       clickerCfg = loadClickerCfg();
+      progressionCfg = loadProgressionCfg();
       const opts = CLICKER_AMOUNTS.map(v => `<option value="${v}">${v.toUpperCase()}</option>`).join('');
       const delayOpts = CLICKER_INTERVALS.map(v => `<option value="${v}">${v} ms</option>`).join('');
       const curSel = document.getElementById('clicker-current');
       const tgtSel = document.getElementById('clicker-target');
       const extSideSel = document.getElementById('extension-side');
       const intervalInp = document.getElementById('clicker-interval');
+      const progEnabled = document.getElementById('progression-enabled');
+      const progSession = document.getElementById('progression-session');
+      const progBase = document.getElementById('progression-base');
+      const progMax = document.getElementById('progression-max');
+      const progReset = document.getElementById('btn-progression-reset');
       if (curSel) {
         curSel.innerHTML = opts;
         curSel.value = clickerCfg.currentAmount;
@@ -5480,6 +5746,49 @@
           clickerCfg.intervalMs = normalizeClickerInterval(e.target.value, clickerCfg.intervalMs);
           e.target.value = String(clickerCfg.intervalMs);
           saveClickerCfg();
+          renderClicker();
+        });
+      }
+      if (progEnabled) {
+        progEnabled.checked = !!progressionCfg.enabled;
+        progEnabled.addEventListener('change', e => {
+          progressionCfg.enabled = !!e.target.checked;
+          saveProgressionCfg();
+          renderClicker();
+        });
+      }
+      if (progSession) {
+        progSession.value = String(progressionCfg.sessionSize);
+        progSession.addEventListener('change', e => {
+          progressionCfg.sessionSize = clampInt(e.target.value, progressionCfg.sessionSize, 1, 20);
+          e.target.value = String(progressionCfg.sessionSize);
+          saveProgressionCfg();
+          renderClicker();
+        });
+      }
+      if (progBase) {
+        progBase.value = String(progressionCfg.baseClicks);
+        progBase.addEventListener('change', e => {
+          progressionCfg.baseClicks = clampInt(e.target.value, progressionCfg.baseClicks, 1, 256);
+          e.target.value = String(progressionCfg.baseClicks);
+          saveProgressionCfg();
+          renderClicker();
+        });
+      }
+      if (progMax) {
+        progMax.value = String(progressionCfg.maxClicks);
+        progMax.addEventListener('change', e => {
+          progressionCfg.maxClicks = clampInt(e.target.value, progressionCfg.maxClicks, 1, 256);
+          e.target.value = String(progressionCfg.maxClicks);
+          saveProgressionCfg();
+          renderClicker();
+        });
+      }
+      if (progReset) {
+        progReset.addEventListener('click', () => {
+          progressionCfg.lossStreak = 0;
+          saveProgressionCfg();
+          setClickerMsg('Progression đã reset về 0%.', 'ok');
           renderClicker();
         });
       }
@@ -5687,7 +5996,19 @@
             blocks: pending.blocks ? pending.blocks.map(b => ({ ...b })) : [],
             cfgNames: pending.configName || '',
             cfgIds: (pending.matchedCfgs || []).map(m => m.id),
+            extensionBet: pending.extensionBet ? { ...pending.extensionBet } : null,
           });
+          if (pending.extensionBet?.progressionEnabled) {
+            const progressionCorrect = actualType === pending.extensionBet.side;
+            applyProgressionResult(progressionCorrect);
+            const progress = progressionState();
+            setClickerMsg(
+              progressionCorrect
+                ? 'Ván cược thắng: progression reset về 0%.'
+                : `Ván cược thua: progression lên ${progress.progressPct}%, lần sau ${progress.betClicks} click.`,
+              progressionCorrect ? 'ok' : 'err',
+            );
+          }
           saveStats();
           saveHist();
           savePctHist();
@@ -5711,20 +6032,16 @@
       if (_hasNewRound) detectAndRecordBreaks(_breakSnap, frame, fin.roundId);
 
       // ── Lưu dự đoán cho ván tiếp theo nếu config khớp ──
-      if (matched.length) {
-        pending = {
-          predictType: matched[0].predictType,
-          hasBet: matched.some(m => m.shouldBet),
-          configName: matched.map(m => m.name).join(', '),
-          blocks: snapshotMatchBlocks(matched),
-          matchedCfgs: matched.map(m => ({
-            id: m.id,
-            predictType: m.predictType,
-            shouldBet: !!m.shouldBet,
-          })),
-        };
+      // Nếu extension đã đặt cược và ván chưa finalize, giữ metadata đó để
+      // progression chỉ cập nhật sau khi có kết quả thật.
+      const activeExtensionBet = pending?.extensionBet ? { ...pending.extensionBet } : null;
+      const nextPending = matched.length ? buildPendingFromMatched() : null;
+      if (activeExtensionBet && !_hasNewRound) {
+        if (nextPending && nextPending.hasBet && nextPending.predictType === activeExtensionBet.side) {
+          pending = { ...nextPending, extensionBet: activeExtensionBet };
+        }
       } else {
-        pending = null;
+        pending = nextPending;
       }
       savePending();
 

@@ -68,12 +68,25 @@ class ExtensionSignalBridge:
             raise ApiError(400, "Mức cược extension không hợp lệ.")
         return text
 
+    @staticmethod
+    def _bet_clicks(value: Any) -> int:
+        if value is None:
+            return 1
+        try:
+            clicks = int(value)
+        except (TypeError, ValueError):
+            raise ApiError(400, "betClicks không hợp lệ.") from None
+        if clicks < 1 or clicks > 256:
+            raise ApiError(400, "betClicks phải nằm trong khoảng 1..256.")
+        return clicks
+
     def publish(self, data: dict[str, Any]) -> dict[str, Any]:
         side = str(data.get("side", "")).strip().lower()
         if side not in {"chan", "le"}:
             raise ApiError(400, "side phải là chan hoặc le.")
         current = self._amount(data.get("currentAmount"))
         target = self._amount(data.get("targetAmount"))
+        bet_clicks = self._bet_clicks(data.get("betClicks"))
         try:
             interval_ms = int(data.get("intervalMs", 650))
         except (TypeError, ValueError):
@@ -89,6 +102,7 @@ class ExtensionSignalBridge:
                 "currentAmount": current,
                 "targetAmount": target,
                 "steps": steps,
+                "betClicks": bet_clicks,
                 "intervalMs": interval_ms,
                 "createdAt": now,
             }
@@ -112,12 +126,17 @@ class ExtensionSignalBridge:
             seq = int(data.get("seq", 0))
         except (TypeError, ValueError):
             seq = 0
+        try:
+            bet_clicks = int(data.get("betClicks") or 1)
+        except (TypeError, ValueError):
+            bet_clicks = 1
         result = {
             "seq": seq,
             "success": bool(data.get("success")),
             "message": str(data.get("message") or ""),
             "side": str(data.get("side") or ""),
             "targetAmount": str(data.get("targetAmount") or ""),
+            "betClicks": max(1, min(256, bet_clicks)),
             "ts": time.time(),
         }
         with self._lock:
@@ -343,7 +362,8 @@ def make_handler(
                         "[extension] intent "
                         f"#{result['seq']} {result['intent']['side']} "
                         f"{result['intent']['currentAmount']}->{result['intent']['targetAmount']} "
-                        f"steps={result['intent']['steps']}"
+                        f"steps={result['intent']['steps']} "
+                        f"betClicks={result['intent']['betClicks']}"
                     )
                     self._send_json(200, result)
                     return True
@@ -353,6 +373,7 @@ def make_handler(
                         "[extension] result "
                         f"#{result['lastResult']['seq']} "
                         f"success={result['lastResult']['success']} "
+                        f"betClicks={result['lastResult']['betClicks']} "
                         f"{result['lastResult']['message']}"
                     )
                     self._send_json(200, result)

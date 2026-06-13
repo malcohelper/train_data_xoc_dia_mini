@@ -40,9 +40,9 @@
     });
   }
 
-  function sendToTab(tabId, message) {
+  function sendToTab(tabId, message, timeoutMs = 7000) {
     if (browserApi) {
-      const timeout = wait(7000).then(() => ({ success: false, message: 'content script timeout' }));
+      const timeout = wait(timeoutMs).then(() => ({ success: false, message: 'content script timeout' }));
       const send = browserApi.tabs.sendMessage(tabId, message)
         .then(response => response || { success: false, message: 'content script empty response' })
         .catch(err => ({ success: false, message: err && err.message ? err.message : String(err) }));
@@ -63,7 +63,7 @@
       } catch (err) {
         finish({ success: false, message: String(err) });
       }
-      setTimeout(() => finish({ success: false, message: 'content script timeout' }), 7000);
+      setTimeout(() => finish({ success: false, message: 'content script timeout' }), timeoutMs);
     });
   }
 
@@ -77,18 +77,24 @@
         message: 'khong tim thay tab game',
         side: intent.side,
         targetAmount: intent.targetAmount,
+        betClicks: intent.betClicks || 1,
       });
       return;
     }
 
     const tab = tabs.find(t => t.active) || tabs[0];
-    const response = await sendToTab(tab.id, { type: 'xd-run-intent', intent });
+    const steps = Math.abs(Number(intent.steps || 0));
+    const betClicks = Math.max(1, Number(intent.betClicks || 1));
+    const interval = Math.max(50, Math.min(600, Number(intent.intervalMs || 250)));
+    const timeoutMs = Math.max(7000, Math.ceil((steps + betClicks) * interval + 4000));
+    const response = await sendToTab(tab.id, { type: 'xd-run-intent', intent }, timeoutMs);
     await postResult({
       seq,
       success: !!(response && response.success),
       message: response && response.message ? response.message : 'no response',
       side: intent.side,
       targetAmount: intent.targetAmount,
+      betClicks: intent.betClicks || 1,
     });
   }
 

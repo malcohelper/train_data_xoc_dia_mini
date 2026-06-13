@@ -55,6 +55,7 @@
       currentAmount: String(intent.currentAmount || ''),
       targetAmount: String(intent.targetAmount || ''),
       steps: Math.trunc(Number(intent.steps || 0)),
+      betClicks: Math.max(1, Math.min(256, Math.trunc(Number(intent.betClicks || 1)))),
       intervalMs: Math.trunc(Number(intent.intervalMs || 250)),
       status: intent.status === 'fail' ? 'fail' : intent.status === 'ok' ? 'ok' : 'pending',
     };
@@ -102,7 +103,7 @@
   function intentText(intent) {
     if (!intent) return 'Last: chua co intent';
     const status = intent.status === 'ok' ? 'OK' : intent.status === 'fail' ? 'FAIL' : 'RUN';
-    return `Last #${intent.seq}: ${status} ${sideText(intent.side)} ${intent.currentAmount}->${intent.targetAmount} - ${stepText(intent.steps)} - ${intent.intervalMs}ms`;
+    return `Last #${intent.seq}: ${status} ${sideText(intent.side)} x${intent.betClicks} ${intent.currentAmount}->${intent.targetAmount} - ${stepText(intent.steps)} - ${intent.intervalMs}ms`;
   }
 
   function createPanel() {
@@ -266,6 +267,7 @@
     const seq = Number(intent.seq || 0);
     const side = intent.side === 'le' ? 'le' : 'chan';
     const steps = Math.trunc(Number(intent.steps || 0));
+    const betClicks = Math.max(1, Math.min(256, Math.trunc(Number(intent.betClicks || 1))));
     const interval = Math.max(50, Math.min(600, Math.trunc(Number(intent.intervalMs || 250))));
     const sidePoint = cfg.points[side];
     const stepKey = steps > 0 ? 'chipRight' : 'chipLeft';
@@ -282,13 +284,16 @@
         dispatchAt(stepPoint);
         await wait(interval);
       }
-      dispatchAt(sidePoint);
+      for (let i = 0; i < betClicks; i += 1) {
+        dispatchAt(sidePoint);
+        if (i < betClicks - 1) await wait(interval);
+      }
       cfg.lastSeq = seq;
       cfg.lastIntent = normalizeIntent({ ...intent, status: 'ok' });
       saveCfg();
       renderPanel();
-      setMsg(`Done #${seq}: ${side}`, true);
-      return { success: true, message: `clicked ${side}` };
+      setMsg(`Done #${seq}: ${side} x${betClicks}`, true);
+      return { success: true, message: `clicked ${side} x${betClicks}` };
     } catch (err) {
       cfg.lastSeq = seq;
       cfg.lastIntent = normalizeIntent({ ...intent, status: 'fail' });

@@ -95,6 +95,19 @@ For end users who just want to run the detector with a pre-trained
 `best.pt`, the repository ships an all-in-one launcher:
 
 ```bash
+chmod +x run_live.sh
+./run_live.sh
+```
+
+`run_live.sh` starts the analytics server at
+`http://127.0.0.1:8000/frame-predict.html` and runs realtime capture in
+headless mode against the default `xocdia` model. Use
+`./run_live.sh --enable-clicker` only when the legacy clicker API is
+needed; other flags are forwarded to `realtime_capture.py`.
+
+For capture-only use:
+
+```bash
 chmod +x run.sh
 ./run.sh
 ```
@@ -242,7 +255,7 @@ python split_dataset.py
 
 ```bash
 python train.py --epochs 150 --batch 16 --imgsz 800
-python train.py --resume runs/detect/xocdia/weights/last.pt
+python train.py --resume runs/detect/runs/detect/xocdia/weights/last.pt
 ```
 
 Defaults are tuned for game UI (`fliplr=0`, `flipud=0`, `degrees=0`,
@@ -252,7 +265,7 @@ Defaults are tuned for game UI (`fliplr=0`, `flipud=0`, `degrees=0`,
 ### 5. Evaluate
 
 ```bash
-python tools/eval.py --weights runs/detect/xocdia/weights/best.pt
+python tools/eval.py --weights runs/detect/runs/detect/xocdia/weights/best.pt
 ```
 
 Prints overall mAP50 / mAP50-95 / P / R and a per-class table. Confusion
@@ -266,11 +279,11 @@ of drawing every box from scratch:
 
 ```bash
 # Fill empty .txt files in dataset/labels/train with model predictions.
-python tools/semi_auto_label.py --weights runs/detect/xocdia/weights/best.pt
+python tools/semi_auto_label.py --weights runs/detect/runs/detect/xocdia/weights/best.pt
 
 # Same, but also write annotated PNG previews to qa_preview/auto for
 # spot-checking before opening the label tool.
-python tools/semi_auto_label.py --weights runs/detect/xocdia/weights/best.pt \
+python tools/semi_auto_label.py --weights runs/detect/runs/detect/xocdia/weights/best.pt \
                                 --preview-dir qa_preview/auto
 
 # Per-category confidence overrides (categories: state, area, dice, cell).
@@ -292,14 +305,14 @@ of an empty canvas.
 
 ```bash
 # Offline: single image -> annotated image + JSON GameState
-python pipeline.py --weights runs/detect/xocdia/weights/best.pt \
+python pipeline.py --weights runs/detect/runs/detect/xocdia/weights/best.pt \
                    --source frame.png --save-annotated annotated.png
 
 # Detector only (no OCR / no state inference)
-python detector.py --weights runs/detect/xocdia/weights/best.pt --source frame.png
+python detector.py --weights runs/detect/runs/detect/xocdia/weights/best.pt --source frame.png
 
 # Real-time screen capture + analyze
-python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt
+python realtime_capture.py --weights runs/detect/runs/detect/xocdia/weights/best.pt
 # A small dialog pops immediately with two buttons:
 #   * "Pick Window" - lists the macOS app windows currently visible
 #     (Quartz/`pyobjc-framework-Quartz`); pick e.g. "Safari - XocDia"

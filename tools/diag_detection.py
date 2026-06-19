@@ -67,7 +67,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("frame", help="Path to a saved capture frame (PNG).")
     p.add_argument("--weights",
-                   default="runs/detect/runs/detect/xocdia-2/weights/best.pt")
+                   default="runs/detect/runs/detect/xocdia/weights/best.pt")
     p.add_argument("--device", default=None,
                    help="Pass 'cpu' or 'mps' to force a device.")
     args = p.parse_args()

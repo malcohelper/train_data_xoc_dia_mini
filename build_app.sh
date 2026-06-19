@@ -8,7 +8,7 @@
 #     (pip install -r requirements would normally handle this; we
 #      verify the critical ones below).
 #   * A trained YOLO weights file at the default path
-#     runs/detect/runs/detect/xocdia-2/weights/best.pt
+#     runs/detect/runs/detect/xocdia/weights/best.pt
 #     (or set XOCDIA_WEIGHTS=/path/to/best.pt)
 #
 # Outputs:

@@ -49,7 +49,7 @@ Compressed zip: ~300 – 500 MB.
    import fails it aborts with a clear message.
 
 4. **A trained `best.pt`** at the default location:
-   `runs/detect/runs/detect/xocdia-2/weights/best.pt`
+   `runs/detect/runs/detect/xocdia/weights/best.pt`
 
    To use a different weights file:
 

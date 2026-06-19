@@ -36,7 +36,7 @@ from PyInstaller.utils.hooks import (
 # Paths / overrides
 # ---------------------------------------------------------------------------
 REPO = Path(SPECPATH).resolve()  # noqa: F821 - SPECPATH is PyInstaller global
-WEIGHTS = REPO / "runs" / "detect" / "runs" / "detect" / "xocdia-2" / "weights" / "best.pt"
+WEIGHTS = REPO / "runs" / "detect" / "runs" / "detect" / "xocdia" / "weights" / "best.pt"
 
 if os.environ.get("XOCDIA_WEIGHTS"):
     WEIGHTS = Path(os.environ["XOCDIA_WEIGHTS"]).resolve()

@@ -26,7 +26,9 @@ Example::
     from pipeline import GameAnalysisPipeline
     import cv2
 
-    pipe = GameAnalysisPipeline(weights="runs/detect/xocdia/weights/best.pt")
+    pipe = GameAnalysisPipeline(
+        weights="runs/detect/runs/detect/xocdia/weights/best.pt"
+    )
     state = pipe.analyze(cv2.imread("frame.png"))
     print(state)
 """
@@ -39,7 +41,7 @@ import numpy as np
 
 from cell_preprocessor import preprocess as preprocess_cell
 from classes import CLASS_NAME_TO_ID
-from detector import Detection, XocDiaDetector
+from detector import DEFAULT_WEIGHTS, Detection, XocDiaDetector
 from ocr_postprocess import sanitise as sanitise_ocr
 
 # Row order of the 6 percent_cell detections in the scoreboard, top to
@@ -124,7 +126,7 @@ class GameState:
 class GameAnalysisPipeline:
     def __init__(
         self,
-        weights: str = "runs/detect/xocdia/weights/best.pt",
+        weights: str = DEFAULT_WEIGHTS,
         conf: float = 0.4,
         iou: float = 0.45,
         imgsz: int = 800,
@@ -365,7 +367,7 @@ assert set(DICE_TO_OUTCOME.keys()).issubset(CLASS_NAME_TO_ID.keys()), \
 def _parse_args():
     import argparse
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--weights", default="runs/detect/xocdia/weights/best.pt")
+    parser.add_argument("--weights", default=DEFAULT_WEIGHTS)
     parser.add_argument("--source", required=True, help="Path to an image file.")
     parser.add_argument("--conf", type=float, default=0.4)
     parser.add_argument("--imgsz", type=int, default=800)

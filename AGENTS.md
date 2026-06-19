@@ -9,7 +9,7 @@ Support scripts are under `tools/` for dataset conversion, label checks, visuali
 ## Build, Test, and Development Commands
 
 - `./run.sh`: create or reuse `venv`, install `requirements.txt`, choose a `best.pt`, and launch live capture.
-- `python realtime_capture.py --weights runs/detect/xocdia/weights/best.pt`: run capture directly from an activated environment.
+- `python realtime_capture.py --weights runs/detect/runs/detect/xocdia/weights/best.pt`: run capture directly from an activated environment.
 - `python -m analytics.serve --rounds-dir rounds --port 8000`: serve the analytics UI and `/api/rounds.json`.
 - `python tools/check_labels.py --split val`: validate YOLO labels against images.
 - `python train.py --epochs 150 --batch 16 --imgsz 800`: train the YOLOv8 model with repository defaults.

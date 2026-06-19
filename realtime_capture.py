@@ -50,7 +50,7 @@ import cv2
 import mss
 import numpy as np
 
-from detector import XocDiaDetector  # noqa: F401 - kept for external callers
+from detector import DEFAULT_WEIGHTS, XocDiaDetector  # noqa: F401 - kept for external callers
 from pipeline import BET_TYPES, GameAnalysisPipeline, GameState, PERCENT_ROW_ORDER
 import window_picker
 
@@ -297,7 +297,7 @@ class RoundTracker:
 class RealtimeCapture:
     def __init__(
         self,
-        weights: str = "runs/detect/xocdia/weights/best.pt",
+        weights: str = DEFAULT_WEIGHTS,
         conf: float = 0.25,
         imgsz: int = 800,
         device=None,
@@ -792,13 +792,21 @@ class RealtimeCapture:
             
         print("=" * 60)
         print("REALTIME DETECTION STARTED")
+        if show_preview:
+            print("Mode: preview window enabled")
+        else:
+            print("Mode: headless (--no-preview); use Ctrl+C to stop")
+        print(f"Capture mode: {effective_mode}")
         print("=" * 60)
-        print("Hotkeys:")
-        print("  r - Select new region")
-        print("  c - Re-clamp current region")
-        print("  d - Toggle diagnostic overlay")
-        print("  s - Save current frame")
-        print("  q - Quit")
+        if show_preview:
+            print("Hotkeys:")
+            print("  r - Select new region")
+            print("  c - Re-clamp current region")
+            print("  d - Toggle diagnostic overlay")
+            print("  s - Save current frame")
+            print("  q - Quit")
+        else:
+            print("Preview disabled; logs and rounds/*.json remain active.")
         print("=" * 60)
         
         last_detect = 0.0
@@ -1062,7 +1070,7 @@ def _parse_args():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--weights", default="runs/detect/xocdia/weights/best.pt")
+    parser.add_argument("--weights", default=DEFAULT_WEIGHTS)
     parser.add_argument("--interval", type=float, default=1.0,
                        help="Detection interval in seconds (default: 1.0)")
     parser.add_argument("--conf", type=float, default=0.25,

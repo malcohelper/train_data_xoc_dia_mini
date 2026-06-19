@@ -7,7 +7,7 @@ processing (grouping, annotation). OCR and game-state reasoning live in
 Example::
 
     from detector import XocDiaDetector
-    det = XocDiaDetector(weights="runs/detect/xocdia/weights/best.pt")
+    det = XocDiaDetector(weights="runs/detect/runs/detect/xocdia/weights/best.pt")
     detections = det.detect(frame)
     groups = det.group_by_category(detections)
     annotated = det.annotate(frame, detections)
@@ -21,6 +21,9 @@ import numpy as np
 from ultralytics import YOLO
 
 from classes import CLASSES, COLORS, category_of
+
+
+DEFAULT_WEIGHTS = "runs/detect/runs/detect/xocdia/weights/best.pt"
 
 
 @dataclass
@@ -93,7 +96,7 @@ class XocDiaDetector:
 
     def __init__(
         self,
-        weights: str = "runs/detect/xocdia/weights/best.pt",
+        weights: str = DEFAULT_WEIGHTS,
         conf: float = 0.4,
         iou: float = 0.45,
         device: Optional[str] = None,
@@ -320,7 +323,7 @@ class XocDiaDetector:
 def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description="Run XocDia detector on an image.")
-    parser.add_argument("--weights", default="runs/detect/xocdia/weights/best.pt")
+    parser.add_argument("--weights", default=DEFAULT_WEIGHTS)
     parser.add_argument("--source", required=True, help="Path to an image file.")
     parser.add_argument("--conf", type=float, default=0.4)
     parser.add_argument("--iou", type=float, default=0.45)

@@ -23,7 +23,7 @@ Default policy (safe):
 Usage::
 
     # Pre-label every image in dataset/images/train that has no label yet.
-    python tools/semi_auto_label.py --weights runs/detect/xocdia/weights/best.pt
+    python tools/semi_auto_label.py --weights runs/detect/runs/detect/xocdia/weights/best.pt
 
     # Same, but also export annotated previews for QA:
     python tools/semi_auto_label.py --weights .../best.pt --preview-dir qa_preview/auto
@@ -84,7 +84,7 @@ def parse_args():
     parser.add_argument(
         "--weights",
         required=True,
-        help="Path to the trained YOLO weights (e.g. runs/detect/xocdia/weights/best.pt).",
+        help="Path to the trained YOLO weights (e.g. runs/detect/runs/detect/xocdia/weights/best.pt).",
     )
     parser.add_argument("--dataset-root", default="dataset")
     parser.add_argument("--split", choices=["train", "val", "raw"], default="train")

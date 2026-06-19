@@ -23,6 +23,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+DEFAULT_WEIGHTS="runs/detect/runs/detect/xocdia/weights/best.pt"
+
 # ---------- 1. find python ----------
 PY=""
 for candidate in python3.11 python3.12 python3 python; do
@@ -111,13 +113,18 @@ if [ -n "$WEIGHTS_OVERRIDE" ]; then
   fi
   echo "[run] Using weights from --weights: $PICK"
 else
-  # Collect best.pt files under runs/detect (any depth).
-  WEIGHTS_LIST=()
-  while IFS= read -r line; do
-    WEIGHTS_LIST+=("$line")
-  done < <(find runs/detect -type f -name best.pt 2>/dev/null | sort)
+  if [ -f "$DEFAULT_WEIGHTS" ]; then
+    PICK="$DEFAULT_WEIGHTS"
+    echo "[run] Using default xocdia weights:"
+    echo "      $PICK"
+  else
+    # Collect best.pt files under runs/detect (any depth).
+    WEIGHTS_LIST=()
+    while IFS= read -r line; do
+      WEIGHTS_LIST+=("$line")
+    done < <(find runs/detect -type f -name best.pt 2>/dev/null | sort)
 
-  if [ "${#WEIGHTS_LIST[@]}" -eq 0 ]; then
+    if [ "${#WEIGHTS_LIST[@]}" -eq 0 ]; then
     cat >&2 <<'MSG'
 ERROR: No best.pt found under runs/detect/.
 
@@ -129,35 +136,36 @@ Either train a model first (see README.md) or pass an explicit
 weights file:
   ./run.sh --weights /path/to/best.pt
 MSG
-    exit 1
-  elif [ "${#WEIGHTS_LIST[@]}" -eq 1 ]; then
-    PICK="${WEIGHTS_LIST[0]}"
-    echo "[run] Auto-picked the only weights available:"
-    echo "      $PICK"
-  else
-    echo "[run] Multiple weights available, choose one:"
-    i=1
-    for w in "${WEIGHTS_LIST[@]}"; do
-      printf "  [%d] %s\n" "$i" "$w"
-      i=$((i + 1))
-    done
-    while :; do
-      printf "Pick a number (1-%d): " "${#WEIGHTS_LIST[@]}"
-      read -r choice
-      case "$choice" in
-        ''|*[!0-9]*)
-          echo "  -> not a number, try again"
-          ;;
-        *)
-          if [ "$choice" -ge 1 ] && [ "$choice" -le "${#WEIGHTS_LIST[@]}" ]; then
-            PICK="${WEIGHTS_LIST[$((choice - 1))]}"
-            break
-          fi
-          echo "  -> out of range, try again"
-          ;;
-      esac
-    done
-    echo "[run] Using weights: $PICK"
+      exit 1
+    elif [ "${#WEIGHTS_LIST[@]}" -eq 1 ]; then
+      PICK="${WEIGHTS_LIST[0]}"
+      echo "[run] Auto-picked the only weights available:"
+      echo "      $PICK"
+    else
+      echo "[run] Multiple weights available, choose one:"
+      i=1
+      for w in "${WEIGHTS_LIST[@]}"; do
+        printf "  [%d] %s\n" "$i" "$w"
+        i=$((i + 1))
+      done
+      while :; do
+        printf "Pick a number (1-%d): " "${#WEIGHTS_LIST[@]}"
+        read -r choice
+        case "$choice" in
+          ''|*[!0-9]*)
+            echo "  -> not a number, try again"
+            ;;
+          *)
+            if [ "$choice" -ge 1 ] && [ "$choice" -le "${#WEIGHTS_LIST[@]}" ]; then
+              PICK="${WEIGHTS_LIST[$((choice - 1))]}"
+              break
+            fi
+            echo "  -> out of range, try again"
+            ;;
+        esac
+      done
+      echo "[run] Using weights: $PICK"
+    fi
   fi
 fi
 

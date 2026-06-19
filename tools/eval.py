@@ -2,7 +2,7 @@
 
 Usage::
 
-    python tools/eval.py --weights runs/detect/xocdia/weights/best.pt
+    python tools/eval.py --weights runs/detect/runs/detect/xocdia/weights/best.pt
     python tools/eval.py --weights best.pt --data xocdia.yaml --split val --imgsz 800
 """
 
